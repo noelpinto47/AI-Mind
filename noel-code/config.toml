@@ -1,0 +1,7 @@
+[server]
+url = "http://noel-server.perch-altair.ts.net:8081"
+
+[agent]
+max_iterations = 20
+auto_confirm = false
+cwd = "."

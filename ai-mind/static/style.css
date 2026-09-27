@@ -1703,6 +1703,145 @@ dialog.settings{width:800px;height:620px;overflow:hidden}
 .setting-row .field:not(textarea){width:240px}
 .setting-row .select{width:200px}
 
+/* ========================= PROJECTS ========================= */
+
+.project-pill{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  max-width:180px;
+  padding:5px 10px 5px 8px;
+  border:1px solid var(--border-soft);
+  border-radius:999px;
+  background:var(--surface-2);
+  color:var(--muted);
+  font-size:12.5px;
+  font-weight:600;
+  cursor:pointer;
+}
+.project-pill:hover{background:var(--surface-hover);color:var(--text)}
+.project-pill .ico{width:13px;height:13px;flex:none}
+.project-pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.project-mark{width:13px;height:13px;color:var(--muted2);flex:none}
+
+dialog.projects{width:720px;height:600px;overflow:hidden}
+.projects-shell{display:flex;flex-direction:column;height:100%;overflow-y:auto}
+.dialog-head-actions{display:flex;align-items:center;gap:8px}
+.dialog-head .icon-button{flex:none}
+
+.project-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  gap:12px;
+}
+.project-card{
+  display:flex;
+  align-items:center;
+  gap:4px;
+  padding:4px;
+  border:1px solid var(--border-soft);
+  border-radius:14px;
+  background:var(--surface-2);
+}
+.project-card-open{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex:1;
+  min-width:0;
+  padding:10px;
+  border:0;
+  border-radius:12px;
+  background:transparent;
+  color:inherit;
+  text-align:left;
+  cursor:pointer;
+}
+.project-card-open:hover{background:var(--surface-hover)}
+.project-card-open .ico{width:20px;height:20px;flex:none;color:var(--muted)}
+.project-card-text{display:flex;flex-direction:column;min-width:0;gap:2px}
+.project-card-name{font-weight:700;font-size:14.5px}
+.project-card-desc{color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.project-card-count{color:var(--muted2);font-size:12px}
+
+.project-empty{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  padding:56px 16px;
+  color:var(--muted);
+  text-align:center;
+}
+.project-empty .ico{width:32px;height:32px;color:var(--muted2)}
+.project-empty p{margin:0}
+.project-empty-text{font-size:13px;color:var(--muted)}
+
+.project-detail-desc{margin:0 0 14px;color:var(--muted);font-size:14px;line-height:1.6}
+.project-instructions{
+  margin:0 0 16px;
+  padding:12px 14px;
+  border:1px solid var(--border-soft);
+  border-radius:12px;
+  background:var(--surface-2);
+}
+.project-instructions summary{cursor:pointer;font-weight:600;font-size:13.5px}
+.project-instructions p{margin:8px 0 0;color:var(--muted);font-size:13.5px;line-height:1.6;white-space:pre-wrap}
+
+.project-chat-list{display:flex;flex-direction:column;gap:2px;margin-top:16px}
+.project-chat-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:9px 10px;
+  border:0;
+  border-radius:10px;
+  background:transparent;
+  color:inherit;
+  text-align:left;
+  font-size:14px;
+  cursor:pointer;
+}
+.project-chat-row:hover{background:var(--surface-hover)}
+.project-chat-row .ico{width:15px;height:15px;flex:none;color:var(--muted)}
+.project-chat-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.field-label{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  margin-bottom:14px;
+  font-size:13px;
+  font-weight:600;
+  color:var(--muted);
+}
+
+.provider-list{display:flex;flex-direction:column;gap:2px;width:100%}
+.provider-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:8px 10px;
+  border-radius:10px;
+  background:var(--surface-2);
+  font-size:13px;
+}
+.provider-row-name{display:flex;align-items:center;gap:8px;font-weight:600}
+.provider-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.provider-dot.is-down{background:var(--danger)}
+.provider-row-model{
+  color:var(--muted);
+  font-size:12.5px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  max-width:50%;
+}
+.provider-row-empty{color:var(--muted);font-style:italic}
+
 /* ========================= TOASTS ========================= */
 
 .toasts{
@@ -1886,6 +2025,7 @@ dialog.settings{width:800px;height:620px;overflow:hidden}
   .toasts{bottom:calc(env(safe-area-inset-bottom,0px) + 120px)}
 
   dialog.settings{width:100%;height:calc(100dvh - 24px)}
+  dialog.projects{width:100%;height:calc(100dvh - 24px)}
   .settings-shell{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
   .settings-nav{flex-direction:row;padding:10px 12px;overflow-x:auto;border-right:0;border-bottom:1px solid var(--border-soft)}
   .settings-tab{flex:none}

@@ -44,7 +44,10 @@ const API = {
   conversationItem: id => `/api/conversations/${encodeURIComponent(id)}`,
   feedback: "/api/feedback",
   share: id => `/api/conversations/${encodeURIComponent(id)}/share`,
-  archive: id => `/api/conversations/${encodeURIComponent(id)}/archive`
+  archive: id => `/api/conversations/${encodeURIComponent(id)}/archive`,
+  aiRouterStatus: "/api/ai-router/status",
+  projects: "/api/projects",
+  project: id => `/api/projects/${encodeURIComponent(id)}`
 };
 
 const FEATURES = {
@@ -101,9 +104,9 @@ const FEATURES = {
     hint: "Accept attachments[] ({name, type, size, data}) where data is a data URL. Text and code files already work."
   },
   modelSettings: {
-    on: false,
+    on: true,
     label: "Model selection",
-    hint: "Accept options.model and options.temperature. Add models to MODELS."
+    hint: "options.model is sent as the router's preferred_provider; options.temperature is not yet read server-side."
   },
   customInstructions: {
     on: false,
@@ -126,9 +129,9 @@ const FEATURES = {
     hint: "POST /api/conversations/<id>/archive and hide archived chats from the list."
   },
   projects: {
-    on: false,
+    on: true,
     label: "Projects",
-    hint: "Group chats with shared files and instructions. Listen for the aimind:feature event."
+    hint: "GET/POST /api/projects, GET/PATCH/DELETE /api/projects/<id>. Instructions are injected into the system prompt server-side."
   },
   promptLibrary: {
     on: false,
@@ -138,10 +141,39 @@ const FEATURES = {
 };
 
 const MODELS = [
-  {id: "auto", name: "Auto", desc: "Picks the right model for the question", ico: "sparkle", live: true},
-  {id: "fast", name: "Fast", desc: "Quick answers for everyday questions", ico: "zap", live: false},
-  {id: "reasoning", name: "Reasoning", desc: "Slower, step-by-step thinking", ico: "bulb", live: false}
+  {id: "auto", name: "Auto", desc: "Automatically uses the best available provider", ico: "sparkle", live: true}
 ];
+
+// Friendly display names for the router's provider ids (ai_router.py state.name).
+const PROVIDER_LABELS = {
+  groq: "Groq",
+  gemini: "Gemini",
+  cloudflare: "Cloudflare",
+  mistral: "Mistral",
+  huggingface: "Hugging Face",
+  openrouter: "OpenRouter"
+};
+
+function providerLabel(name) {
+  return PROVIDER_LABELS[name] || (name ? name[0].toUpperCase() + name.slice(1) : name);
+}
+
+// The live model list: "Auto" plus one entry per provider actually
+// configured in ai_router.py (fetched from /api/ai-router/status).
+// Falls back to just "Auto" if that fetch hasn't happened yet or failed.
+function availableModels() {
+  if (!state.providers.length) return MODELS;
+  return [
+    MODELS[0],
+    ...state.providers.map(p => ({
+      id: p.provider,
+      name: providerLabel(p.provider),
+      desc: p.available ? p.model : `${p.model} · resting after a recent failure`,
+      ico: "bulb",
+      live: true
+    }))
+  ];
+}
 
 const MODES = {
   deepResearch: {label: "Deep research", ico: "compass"},
@@ -410,6 +442,8 @@ const dom = {
   openSettings: $("#open-settings"),
   sidebarToggle: $("#mobile-history"),
   chatTitle: $("#chat-title"),
+  projectPill: $("#project-pill"),
+  projectPillLabel: $("#project-pill-label"),
   shareButton: $("#share-button"),
   chatMenuButton: $("#chat-menu-button"),
   themeToggle: $("#theme-toggle"),
@@ -450,6 +484,7 @@ const dom = {
   shortcuts: $("#shortcuts-dialog"),
   confirm: $("#confirm-dialog"),
   palette: $("#palette-dialog"),
+  projects: $("#projects-dialog"),
   paletteInput: $("#palette-input"),
   paletteList: $("#palette-list")
 };
@@ -493,7 +528,10 @@ const state = {
   speaking: null,
   recognition: null,
   panel: null,
-  paletteChats: []
+  paletteChats: [],
+  providers: [],          // cached /api/ai-router/status list, feeds availableModels()
+  projects: [],           // cached /api/projects list
+  newChatProjectId: null  // set by "+ New chat" inside a project; consumed by buildPayload()
 };
 
 /** Elements for messages, kept out of the message objects so they stay serialisable. */
@@ -536,8 +574,12 @@ function applySettings() {
   dom.profileAvatar.textContent = (name || "N").charAt(0).toUpperCase();
   dom.welcomeTitle.textContent = greeting();
 
-  const model = MODELS.find(m => m.id === state.settings.model) || MODELS[0];
+  const models = availableModels();
+  const model = models.find(m => m.id === state.settings.model) || models[0];
   dom.modelLabel.textContent = model.name;
+  dom.modelButton.title = model.id === "auto"
+    ? `Auto — ${model.desc}`
+    : `${model.name} — ${model.desc}`;
 
   const mod = IS_MAC ? "⌘" : "Ctrl";
   dom.keyHint.textContent = state.settings.enterToSend
@@ -1010,6 +1052,13 @@ function normalizeFollowUps(list) {
 
 function normalizeMessage(raw) {
   const usage = raw.usage && typeof raw.usage === "object" ? raw.usage : null;
+  // History loaded from the server (GET /api/conversation/<id>) carries
+  // router info nested under `metadata` (see database.py get_messages),
+  // not at the top level the way a fresh /api/chat response does. Without
+  // this, the provider/model badge would render right after sending a
+  // message but vanish the moment the conversation reloads from history
+  // (e.g. after switching tabs and coming back to a backgrounded page).
+  const metadata = raw.metadata && typeof raw.metadata === "object" ? raw.metadata : null;
   return {
     id: raw.id ?? null,
     role: raw.role === "user" ? "user" : "assistant",
@@ -1020,11 +1069,11 @@ function normalizeMessage(raw) {
     sources: normalizeSources(raw.sources),
     followUps: normalizeFollowUps(raw.follow_ups ?? raw.followUps),
     usage,
-    provider: raw.provider || (usage && usage.provider) || null,
-    model: raw.model || (usage && usage.model) || null,
-    latency_ms: raw.latency_ms || (usage && usage.latency_ms) || null,
-    fallback_used: raw.fallback_used || (usage && usage.fallback_used) || null,
-    attempts: raw.attempts || (usage && usage.attempts) || null
+    provider: raw.provider || (metadata && metadata.provider) || (usage && usage.provider) || null,
+    model: raw.model || (metadata && metadata.model) || (usage && usage.model) || null,
+    latencyMs: raw.latency_ms || (metadata && metadata.latency_ms) || (usage && usage.latency_ms) || null,
+    fallback_used: raw.fallback_used ?? (metadata && metadata.fallback_used) ?? (usage && usage.fallback_used) ?? null,
+    attempts: raw.attempts || (metadata && metadata.attempts) || (usage && usage.attempts) || null
   };
 }
 
@@ -1488,7 +1537,9 @@ function normalizeReply(data) {
     usage,
     id: data.message_id ?? null,
     provider: data.provider || null,
-    model: data.model || null
+    model: data.model || null,
+    projectId: data.project_id ?? null,
+    projectName: data.project_name || null
   };
 }
 
@@ -1496,11 +1547,19 @@ function adoptConversation(reply) {
   if (reply.conversationId === null || reply.conversationId === undefined || reply.conversationId === "") return;
   state.conversationId = reply.conversationId;
   store.set("conversation_id", String(reply.conversationId));
+  state.newChatProjectId = null;
+  renderProjectPill(reply.projectId ? {id: reply.projectId, name: reply.projectName} : null);
 }
 
 function buildPayload(content, {regenerate, editIndex, files}) {
   const payload = {message: content, conversation_id: state.conversationId};
   const options = {};
+
+  // Only meaningful when starting a brand-new conversation - the backend
+  // only honors project_id at creation time (see /api/chat).
+  if (!state.conversationId && state.newChatProjectId) {
+    payload.project_id = state.newChatProjectId;
+  }
 
   if (FEATURES.modelSettings.on) {
     options.model = state.settings.model;
@@ -1870,8 +1929,14 @@ function conversationItem(conversation) {
   }, icon("more"));
   more.addEventListener("click", event => {
     event.stopPropagation();
-    openMenu(more, conversationMenuItems(conversation), {placement: "bottom-end", minWidth: 200});
+    openMenu(more, conversationMenuItems(conversation, {anchor: more}), {placement: "bottom-end", minWidth: 200});
   });
+
+  let projectMark = null;
+  if (conversation.project_id) {
+    projectMark = icon("folder", "project-mark");
+    projectMark.setAttribute("title", conversation.project_name || "In a project");
+  }
 
   const item = h("div", {
     class: `conversation-item${active ? " active" : ""}`,
@@ -1882,6 +1947,7 @@ function conversationItem(conversation) {
     dataset: {id: String(conversation.id)}
   },
     pinned ? icon("pin", "pin-mark") : null,
+    projectMark,
     h("span", {class: "conversation-title"}, title),
     h("span", {class: "conversation-actions"}, more));
 
@@ -1954,9 +2020,11 @@ async function loadConversations() {
 function resetToNewChat() {
   state.epoch += 1;
   state.conversationId = null;
+  state.newChatProjectId = null;
   store.remove("conversation_id");
   clearMessages();
   setTitle("New chat");
+  renderProjectPill(null);
   renderConversations();
 }
 
@@ -2002,6 +2070,8 @@ async function selectConversation(id) {
 
     setWelcomeVisible(state.messages.length === 0);
     setTitle(data.title || "New chat");
+    state.newChatProjectId = null;
+    renderProjectPill(data.project_id ? {id: data.project_id, name: data.project_name} : null);
     state.attachments = [];
     renderAttachments();
     dom.input.value = loadDraft();
@@ -2172,11 +2242,12 @@ function exportCurrent(format) {
   exportConversation(state.conversationId, format);
 }
 
-function conversationMenuItems(conversation, {includePrint = false} = {}) {
+function conversationMenuItems(conversation, {includePrint = false, anchor} = {}) {
   const pinned = state.pinned.has(String(conversation.id));
   return [
     {label: "Rename", ico: "pencil", onClick: () => startRename(conversation)},
     {label: pinned ? "Unpin" : "Pin", ico: "pin", onClick: () => togglePin(conversation.id)},
+    {label: "Move to project", ico: "folder", onClick: () => openMoveToProjectMenu(anchor, conversation)},
     {label: "Share", ico: "share", feature: "share", onClick: () => shareConversation(conversation.id)},
     {divider: true},
     {label: "Export as Markdown", ico: "download", onClick: () => exportConversation(conversation.id, "md")},
@@ -2186,6 +2257,45 @@ function conversationMenuItems(conversation, {includePrint = false} = {}) {
     {divider: true},
     {label: "Delete", ico: "trash", danger: true, onClick: () => removeConversation(conversation)}
   ].filter(Boolean);
+}
+
+function openMoveToProjectMenu(anchor, conversation) {
+  if (!anchor) return;
+  const items = [{heading: "Move to project"}];
+
+  if (!state.projects.length) {
+    items.push({label: "No projects yet — create one", ico: "plus", onClick: () => openProjects()});
+  } else {
+    state.projects.forEach(project => {
+      items.push({
+        label: project.name,
+        ico: "folder",
+        checked: sameId(conversation.project_id, project.id),
+        onClick: () => moveConversationToProject(conversation, project.id)
+      });
+    });
+  }
+
+  if (conversation.project_id) {
+    items.push({divider: true});
+    items.push({label: "Remove from project", ico: "x", onClick: () => moveConversationToProject(conversation, null)});
+  }
+
+  openMenu(anchor, items, {placement: "bottom-end", minWidth: 220});
+}
+
+async function moveConversationToProject(conversation, projectId) {
+  try {
+    await api(API.conversationItem(conversation.id), {method: "PATCH", body: {project_id: projectId}});
+    await loadConversations();
+    if (sameId(conversation.id, state.conversationId)) {
+      const project = projectId ? state.projects.find(item => sameId(item.id, projectId)) : null;
+      renderProjectPill(project ? {id: project.id, name: project.name} : null);
+    }
+    toast(projectId ? "Moved to project." : "Removed from project.");
+  } catch (error) {
+    toast(error.message, {type: "error"});
+  }
 }
 
 function currentConversation() {
@@ -2200,13 +2310,258 @@ function openChatMenu() {
     toast("Send a message first to see chat options.");
     return;
   }
-  openMenu(dom.chatMenuButton, conversationMenuItems(conversation, {includePrint: true}), {placement: "bottom-end", minWidth: 220});
+  openMenu(dom.chatMenuButton, conversationMenuItems(conversation, {includePrint: true, anchor: dom.chatMenuButton}), {placement: "bottom-end", minWidth: 220});
 }
 
 function startTitleRename() {
   const conversation = currentConversation();
   if (!conversation) return;
   inlineEdit(dom.chatTitle, {value: state.title, onCommit: title => renameConversation(conversation.id, title)});
+}
+
+/* ---------------------------------------------------------------------
+   7b. Projects
+   --------------------------------------------------------------------- */
+
+async function loadProviders() {
+  try {
+    const data = await api(API.aiRouterStatus);
+    state.providers = Array.isArray(data.providers) ? data.providers : [];
+  } catch (error) {
+    console.error("Failed to load provider status", error);
+  }
+  applySettings();
+}
+
+async function loadProjects() {
+  try {
+    const data = await api(API.projects);
+    state.projects = Array.isArray(data.projects) ? data.projects : [];
+  } catch (error) {
+    console.error("Failed to load projects", error);
+  }
+  return state.projects;
+}
+
+function renderProjectPill(project) {
+  if (!dom.projectPill) return;
+  if (project && project.id) {
+    dom.projectPillLabel.textContent = project.name;
+    dom.projectPill.hidden = false;
+  } else {
+    dom.projectPill.hidden = true;
+  }
+}
+
+function projectFieldset({name = "", description = "", instructions = ""} = {}) {
+  const nameInput = h("input", {
+    class: "field", type: "text", maxlength: "80",
+    placeholder: "Project name", "aria-label": "Project name"
+  });
+  nameInput.value = name;
+
+  const descInput = h("textarea", {
+    class: "field textarea", rows: "2",
+    placeholder: "What is this project for? (optional)",
+    "aria-label": "Project description"
+  });
+  descInput.value = description;
+
+  const instructionsInput = h("textarea", {
+    class: "field textarea", rows: "5",
+    placeholder: "Instructions the assistant should follow in every chat in this project (optional)",
+    "aria-label": "Project instructions"
+  });
+  instructionsInput.value = instructions;
+
+  return {nameInput, descInput, instructionsInput};
+}
+
+function renderProjects(view = "list", payload = null) {
+  if (view === "list") {
+    const cards = state.projects.map(project => {
+      const openButton = h("button", {
+        type: "button", class: "project-card-open",
+        onclick: () => openProjectDetail(project.id)
+      },
+        icon("folder"),
+        h("div", {class: "project-card-text"},
+          h("div", {class: "project-card-name"}, project.name),
+          h("div", {class: "project-card-desc"}, project.description || "No description yet"),
+          h("div", {class: "project-card-count"},
+            `${project.conversation_count} chat${project.conversation_count === 1 ? "" : "s"}`)));
+
+      const moreButton = h("button", {
+        type: "button", class: "icon-button", "aria-label": `More for ${project.name}`
+      }, icon("more"));
+      moreButton.addEventListener("click", event => {
+        event.stopPropagation();
+        openMenu(moreButton, [
+          {label: "Open", ico: "folder", onClick: () => openProjectDetail(project.id)},
+          {label: "Edit", ico: "pencil", onClick: () => renderProjects("edit", project)},
+          {divider: true},
+          {label: "Delete", ico: "trash", danger: true, onClick: () => deleteProjectFlow(project)}
+        ], {placement: "bottom-end"});
+      });
+
+      return h("div", {class: "project-card"}, openButton, moreButton);
+    });
+
+    const body = state.projects.length
+      ? h("div", {class: "project-grid"}, cards)
+      : h("div", {class: "project-empty"},
+          icon("folder"),
+          h("p", null, "No projects yet."),
+          h("p", {class: "project-empty-text"}, "Group related chats under shared instructions, the way you would in Claude or ChatGPT."));
+
+    dom.projects.replaceChildren(h("div", {class: "dialog-form projects-shell"},
+      h("div", {class: "dialog-head"},
+        h("h2", {class: "dialog-title"}, "Projects"),
+        h("div", {class: "dialog-head-actions"},
+          h("button", {type: "button", class: "btn primary sm", onclick: () => renderProjects("edit")},
+            icon("plus"), "New project"),
+          h("button", {
+            type: "button", class: "icon-button", "aria-label": "Close",
+            onclick: () => dom.projects.close()
+          }, icon("x")))),
+      body));
+    return;
+  }
+
+  if (view === "detail") {
+    const project = payload;
+    const conversations = project.conversations || [];
+
+    const chatRows = conversations.length
+      ? conversations.map(conversation => h("button", {
+          type: "button", class: "project-chat-row",
+          onclick: () => { dom.projects.close(); selectConversation(conversation.id); }
+        }, icon("chat"), h("span", null, conversation.title)))
+      : [h("p", {class: "project-empty-text"}, "No chats in this project yet.")];
+
+    dom.projects.replaceChildren(h("div", {class: "dialog-form projects-shell"},
+      h("div", {class: "dialog-head"},
+        h("button", {
+          type: "button", class: "icon-button", "aria-label": "Back to projects",
+          onclick: () => openProjects()
+        }, icon("chevron-left")),
+        h("h2", {class: "dialog-title"}, project.name),
+        h("div", {class: "dialog-head-actions"},
+          h("button", {
+            type: "button", class: "icon-button", "aria-label": "Edit project",
+            onclick: () => renderProjects("edit", project)
+          }, icon("pencil")),
+          h("button", {
+            type: "button", class: "icon-button", "aria-label": "Close",
+            onclick: () => dom.projects.close()
+          }, icon("x")))),
+      project.description ? h("p", {class: "project-detail-desc"}, project.description) : null,
+      project.instructions ? h("details", {class: "project-instructions"},
+        h("summary", null, "Project instructions"),
+        h("p", null, project.instructions)) : null,
+      h("button", {
+        type: "button", class: "btn primary",
+        onclick: () => startChatInProject(project.id, project.name)
+      }, icon("plus"), "New chat in this project"),
+      h("div", {class: "project-chat-list"}, chatRows)));
+    return;
+  }
+
+  if (view === "edit") {
+    const project = payload; // null when creating a brand-new project
+    const {nameInput, descInput, instructionsInput} = projectFieldset(project || {});
+
+    const form = h("form", {class: "dialog-form"},
+      h("div", {class: "dialog-head"},
+        h("h2", {class: "dialog-title"}, project ? "Edit project" : "New project"),
+        h("button", {
+          type: "button", class: "icon-button", "aria-label": "Close",
+          onclick: () => dom.projects.close()
+        }, icon("x"))),
+      h("label", {class: "field-label"}, "Name", nameInput),
+      h("label", {class: "field-label"}, "Description", descInput),
+      h("label", {class: "field-label"}, "Instructions", instructionsInput),
+      h("div", {class: "dialog-actions"},
+        h("button", {
+          type: "button", class: "btn ghost",
+          onclick: () => project ? openProjectDetail(project.id) : renderProjects("list")
+        }, "Cancel"),
+        project ? h("button", {
+          type: "button", class: "btn danger",
+          onclick: () => deleteProjectFlow(project)
+        }, "Delete project") : null,
+        h("button", {type: "submit", class: "btn primary"}, project ? "Save changes" : "Create project")));
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const name = nameInput.value.trim();
+      if (!name) { nameInput.focus(); return; }
+
+      const payloadBody = {
+        name,
+        description: descInput.value.trim(),
+        instructions: instructionsInput.value.trim()
+      };
+
+      try {
+        const data = project
+          ? await api(API.project(project.id), {method: "PATCH", body: payloadBody})
+          : await api(API.projects, {method: "POST", body: payloadBody});
+        await loadProjects();
+        openProjectDetail(data.project.id);
+      } catch (error) {
+        toast(error.message, {type: "error"});
+      }
+    });
+
+    dom.projects.replaceChildren(form);
+    nameInput.focus();
+    return;
+  }
+}
+
+async function openProjectDetail(projectId) {
+  try {
+    const data = await api(API.project(projectId));
+    renderProjects("detail", {...data.project, conversations: data.conversations});
+  } catch (error) {
+    toast(error.message, {type: "error"});
+  }
+}
+
+async function deleteProjectFlow(project) {
+  const ok = await confirmDialog({
+    title: `Delete "${project.name}"?`,
+    body: "Chats in this project are kept — they'll just become unfiled. This can't be undone.",
+    confirmLabel: "Delete project",
+    danger: true
+  });
+  if (!ok) return;
+
+  try {
+    await api(API.project(project.id), {method: "DELETE"});
+    await loadProjects();
+    renderProjects("list");
+    if (currentConversation() && sameId(currentConversation().project_id, project.id)) {
+      renderProjectPill(null);
+    }
+    toast("Project deleted.");
+  } catch (error) {
+    toast(error.message, {type: "error"});
+  }
+}
+
+function openProjects() {
+  renderProjects("list");
+  openDialog(dom.projects);
+  loadProjects().then(() => { if (dom.projects.open) renderProjects("list"); });
+}
+
+function startChatInProject(projectId, projectName) {
+  dom.projects.close();
+  newChat();
+  state.newChatProjectId = projectId;
+  renderProjectPill({id: projectId, name: projectName});
 }
 
 /* ---------------------------------------------------------------------
@@ -2466,14 +2821,12 @@ function openToolsMenu() {
 function openModelMenu() {
   openMenu(dom.modelButton, [
     {heading: "Model"},
-    ...MODELS.map(model => ({
+    ...availableModels().map(model => ({
       label: model.name,
       desc: model.desc,
       ico: model.ico,
-      feature: model.live ? null : "modelSettings",
       checked: state.settings.model === model.id,
       onClick: () => {
-        if (!model.live && !requireFeature("modelSettings")) return;
         state.settings.model = model.id;
         saveSettings();
         applySettings();
@@ -2929,14 +3282,10 @@ function settingsPersonalization() {
 
 function settingsModel() {
   const s = state.settings;
+  const models = availableModels();
   const select = h("select", {class: "field select", "aria-label": "Default model"},
-    MODELS.map(model => h("option", {value: model.id, selected: model.id === s.model}, model.live ? model.name : `${model.name} (soon)`)));
+    models.map(model => h("option", {value: model.id, selected: model.id === s.model}, model.name)));
   select.addEventListener("change", () => {
-    const model = MODELS.find(item => item.id === select.value);
-    if (model && !model.live && !requireFeature("modelSettings")) {
-      select.value = s.model;
-      return;
-    }
     updateSetting("model", select.value);
   });
 
@@ -2949,13 +3298,29 @@ function settingsModel() {
     updateSetting("temperature", Number(range.value));
   });
 
+  const providerRows = state.providers.length
+    ? state.providers.map(p => h("div", {class: "provider-row"},
+        h("span", {class: "provider-row-name"},
+          h("span", {class: `provider-dot ${p.available ? "is-up" : "is-down"}`}), providerLabel(p.provider)),
+        h("span", {class: "provider-row-model"}, p.model)))
+    : [h("div", {class: "provider-row provider-row-empty"}, "No providers configured yet — add an API key in .env.")];
+
   return [
-    settingRow({title: "Default model", desc: "Used for new messages.", feature: "modelSettings", control: select}),
+    settingRow({
+      title: "Default model",
+      desc: "Auto uses the router's normal priority order. Picking a provider forces it first for new messages, and it still falls back automatically if that provider is unavailable.",
+      control: select
+    }),
     settingRow({
       title: "Temperature",
       desc: "Lower is more focused. Higher is more varied.",
-      feature: "modelSettings",
       control: h("div", {class: "range-wrap"}, range, output)
+    }),
+    settingRow({
+      title: "Configured providers",
+      desc: "From /api/ai-router/status, in the order the router tries them.",
+      stacked: true,
+      control: h("div", {class: "provider-list"}, providerRows)
     })
   ];
 }
@@ -3179,8 +3544,14 @@ function bindEvents() {
   $$(".nav-item[data-feature]").forEach(item => {
     item.addEventListener("click", () => {
       const key = item.dataset.feature;
+      if (key === "projects") { openProjects(); return; }
       if (requireFeature(key)) emitFeature(key);
     });
+  });
+  if (dom.projectPill) dom.projectPill.addEventListener("click", () => {
+    const conversation = currentConversation();
+    if (conversation && conversation.project_id) openProjectDetail(conversation.project_id);
+    else if (state.newChatProjectId) openProjectDetail(state.newChatProjectId);
   });
 
   /* Top bar */
@@ -3312,6 +3683,8 @@ async function boot() {
 
   dom.input.value = loadDraft();
   loadConversations();
+  loadProviders();
+  loadProjects();
   if (state.conversationId !== null && state.conversationId !== undefined && state.conversationId !== "") {
     await selectConversation(state.conversationId);
   }

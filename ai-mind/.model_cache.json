@@ -1,0 +1,11 @@
+{
+  "timestamp": 1790537858.0484555,
+  "models": {
+    "groq": "qwen/qwen3.8-27b",
+    "gemini": "models/gemini-2.5-flash",
+    "cloudflare": "@cf/zai-org/glm-5.3",
+    "mistral": "mistral-small-2603",
+    "huggingface": "zai-org/GLM-5.3-Flash",
+    "openrouter": "fireworks/ember-1"
+  }
+}

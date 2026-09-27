@@ -19,6 +19,12 @@ from database import (
     list_conversations,
     rename_conversation,
     delete_conversation,
+    set_conversation_project,
+    create_project,
+    list_projects,
+    get_project,
+    update_project,
+    delete_project,
     add_memory,
     get_memories,
     add_ignored_memory,
@@ -385,15 +391,36 @@ def chat():
 
     conversation_id = data.get("conversation_id")
     message = data.get("message", "").strip()
+    options = data.get("options") or {}
 
     if not message:
         return jsonify({
             "error": "Message cannot be empty"
         }), 400
 
-    # Create a conversation if one doesn't exist
+    # Create a conversation if one doesn't exist. A project_id may be
+    # supplied to file the brand-new conversation under a project (e.g.
+    # "New chat" was started from inside that project's view). It is
+    # only honored here, at creation time - moving an existing
+    # conversation between projects goes through
+    # PATCH /api/conversations/<id> instead.
     if not conversation_id:
-        conversation_id = create_conversation()
+        requested_project_id = data.get("project_id")
+        project_id = None
+
+        if requested_project_id is not None:
+            try:
+                requested_project_id = int(requested_project_id)
+            except (TypeError, ValueError):
+                requested_project_id = None
+
+            if (
+                requested_project_id is not None
+                and get_project(requested_project_id)
+            ):
+                project_id = requested_project_id
+
+        conversation_id = create_conversation(project_id=project_id)
 
     elif not get_conversation(conversation_id):
         return jsonify({
@@ -439,6 +466,28 @@ def chat():
         communication_style = get_communication_style()["profile"]
 
         # ----------------------------------------------------
+        # Project context (if this conversation belongs to one)
+        # ----------------------------------------------------
+
+        conversation_data = get_conversation(conversation_id)
+        project = None
+
+        if conversation_data and conversation_data.get("project_id"):
+            project = get_project(conversation_data["project_id"])
+
+        project_text = ""
+
+        if project and project.get("instructions"):
+            project_text = (
+                "This chat is part of the project \"{name}\". "
+                "Follow these project-specific instructions:\n"
+                "{instructions}"
+            ).format(
+                name=project["name"],
+                instructions=project["instructions"]
+            )
+
+        # ----------------------------------------------------
         # Build memory context
         # ----------------------------------------------------
 
@@ -470,6 +519,8 @@ You are Noel's personal AI assistant.
 
 You should be helpful, natural, and conversational.
 
+{project_text}
+
 The following information has been explicitly saved as
 long-term memory about the user:
 
@@ -498,6 +549,7 @@ memories unless the user explicitly asks about it.
 
 Do not invent additional facts about the user.
         """.format(
+            project_text=project_text,
             memory_text=(
                 memory_text
                 if memory_text
@@ -526,9 +578,21 @@ Do not invent additional facts about the user.
             }
         ] + messages
 
+        # A model of "auto" (or nothing) means: use the router's normal
+        # priority order. Anything else is a provider name the user
+        # explicitly picked in the UI, which the router will try first
+        # and still fall back from automatically if it's unavailable.
+        requested_model = options.get("model")
+        preferred_provider = (
+            str(requested_model).strip().lower()
+            if requested_model and requested_model != "auto"
+            else None
+        )
+
         ai_result = ai_router.chat(
             messages=messages_for_ai,
-            max_tokens=MAX_TOKENS
+            max_tokens=MAX_TOKENS,
+            preferred_provider=preferred_provider
         )
 
         content = ai_result["content"]
@@ -579,6 +643,18 @@ Do not invent additional facts about the user.
         return jsonify({
             "conversation_id": conversation_id,
             "response": content,
+
+            # Project this conversation belongs to, if any
+            "project_id": (
+                conversation_data.get("project_id")
+                if conversation_data
+                else None
+            ),
+            "project_name": (
+                conversation_data.get("project_name")
+                if conversation_data
+                else None
+            ),
 
             # Router metadata
             "provider": ai_result["provider"],
@@ -635,6 +711,8 @@ def conversation(conversation_id):
         "title": conversation_data["title"],
         "created_at": conversation_data["created_at"],
         "updated_at": conversation_data["updated_at"],
+        "project_id": conversation_data.get("project_id"),
+        "project_name": conversation_data.get("project_name"),
         "messages": messages
     })
 
@@ -644,8 +722,18 @@ def conversations():
 
     search = request.args.get("search", "")
 
+    project_id = request.args.get("project_id")
+    if project_id is not None:
+        try:
+            project_id = int(project_id)
+        except ValueError:
+            project_id = None
+
     return jsonify({
-        "conversations": list_conversations(search=search)
+        "conversations": list_conversations(
+            search=search,
+            project_id=project_id
+        )
     })
 
 
@@ -655,26 +743,57 @@ def conversations():
 )
 def rename_conversation_route(conversation_id):
 
-    data = request.get_json() or {}
-
-    title = " ".join(
-        str(data.get("title", "")).split()
-    ).strip()
-
-    if not title:
-        return jsonify({
-            "error": "Conversation title cannot be empty"
-        }), 400
-
-    if len(title) > 80:
-        return jsonify({
-            "error": "Conversation title cannot exceed 80 characters"
-        }), 400
-
-    if not rename_conversation(conversation_id, title):
+    if not get_conversation(conversation_id):
         return jsonify({
             "error": "Conversation not found"
         }), 404
+
+    data = request.get_json() or {}
+    updated_something = False
+
+    # Renaming (unchanged behavior when only "title" is sent).
+    if "title" in data:
+        title = " ".join(
+            str(data.get("title", "")).split()
+        ).strip()
+
+        if not title:
+            return jsonify({
+                "error": "Conversation title cannot be empty"
+            }), 400
+
+        if len(title) > 80:
+            return jsonify({
+                "error": "Conversation title cannot exceed 80 characters"
+            }), 400
+
+        rename_conversation(conversation_id, title)
+        updated_something = True
+
+    # Moving into/out of a project. project_id: null unfiles the chat.
+    if "project_id" in data:
+        project_id = data.get("project_id")
+
+        if project_id is not None:
+            try:
+                project_id = int(project_id)
+            except (TypeError, ValueError):
+                return jsonify({
+                    "error": "project_id must be a number or null"
+                }), 400
+
+            if not get_project(project_id):
+                return jsonify({
+                    "error": "Project not found"
+                }), 404
+
+        set_conversation_project(conversation_id, project_id)
+        updated_something = True
+
+    if not updated_something:
+        return jsonify({
+            "error": "Nothing to update"
+        }), 400
 
     return jsonify({
         "conversation": get_conversation(conversation_id)
@@ -695,6 +814,124 @@ def delete_conversation_route(conversation_id):
     return jsonify({
         "success": True,
         "conversation_id": conversation_id
+    })
+
+
+# ============================================================
+# Projects
+# ============================================================
+
+def _validate_project_name(name):
+    name = " ".join(str(name or "").split()).strip()
+
+    if not name:
+        return None, ("Project name cannot be empty", 400)
+
+    if len(name) > 80:
+        return None, ("Project name cannot exceed 80 characters", 400)
+
+    return name, None
+
+
+@app.route("/api/projects", methods=["GET"])
+def projects_route():
+    return jsonify({
+        "projects": list_projects()
+    })
+
+
+@app.route("/api/projects", methods=["POST"])
+def create_project_route():
+    data = request.get_json() or {}
+
+    name, error = _validate_project_name(data.get("name"))
+    if error:
+        message, status = error
+        return jsonify({"error": message}), status
+
+    description = str(data.get("description", "")).strip()
+    instructions = str(data.get("instructions", "")).strip()
+
+    project_id = create_project(name, description, instructions)
+
+    return jsonify({
+        "project": get_project(project_id)
+    })
+
+
+@app.route(
+    "/api/projects/<int:project_id>",
+    methods=["GET"]
+)
+def project_detail_route(project_id):
+    project = get_project(project_id)
+
+    if not project:
+        return jsonify({
+            "error": "Project not found"
+        }), 404
+
+    return jsonify({
+        "project": project,
+        "conversations": list_conversations(project_id=project_id)
+    })
+
+
+@app.route(
+    "/api/projects/<int:project_id>",
+    methods=["PATCH"]
+)
+def update_project_route(project_id):
+    if not get_project(project_id):
+        return jsonify({
+            "error": "Project not found"
+        }), 404
+
+    data = request.get_json() or {}
+
+    name = None
+    if "name" in data:
+        name, error = _validate_project_name(data.get("name"))
+        if error:
+            message, status = error
+            return jsonify({"error": message}), status
+
+    description = (
+        str(data.get("description", "")).strip()
+        if "description" in data
+        else None
+    )
+    instructions = (
+        str(data.get("instructions", "")).strip()
+        if "instructions" in data
+        else None
+    )
+
+    update_project(
+        project_id,
+        name=name,
+        description=description,
+        instructions=instructions
+    )
+
+    return jsonify({
+        "project": get_project(project_id)
+    })
+
+
+@app.route(
+    "/api/projects/<int:project_id>",
+    methods=["DELETE"]
+)
+def delete_project_route(project_id):
+    if not delete_project(project_id):
+        return jsonify({
+            "error": "Project not found"
+        }), 404
+
+    return jsonify({
+        "success": True,
+        "project_id": project_id
     })
 
 
@@ -927,6 +1164,71 @@ def ai_status():
 
     return jsonify(AI_STATUS)
 
+@app.route("/api/chat/agent", methods=["POST"])
+def chat_agent():
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    messages = data.get("messages", [])
+    tools = data.get("tools", [])
+
+    if not messages:
+        return jsonify({"error": "messages required"}), 400
+
+    # Resolve session_id to a real integer conversation_id.
+    # noel-code sends a random string tag on first call — treat that
+    # as "no conversation yet" and create one.
+    conversation_id = None
+
+    if session_id is not None:
+        try:
+            candidate = int(session_id)
+            if get_conversation(candidate):
+                conversation_id = candidate
+        except (TypeError, ValueError):
+            pass  # string tag like "a3f9b2c1" — create a new conversation
+
+    if conversation_id is None:
+        conversation_id = create_conversation()  # returns int
+
+    # Save user messages to history
+    for msg in messages:
+        if msg.get("role") == "user":
+            add_message(conversation_id, "user", msg.get("content", ""))
+            break  # only save the latest user turn
+
+    system_message = {
+        "role": "system",
+        "content": "You are Noel's coding assistant. Use the provided tools to read, write, and execute code. Think step by step."
+    }
+
+    messages_for_ai = [system_message] + messages
+
+    try:
+        result = ai_router.chat(
+            messages=messages_for_ai,
+            max_tokens=2000,
+            tools=tools if tools else None
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    content = result.get("content") or ""
+    tool_calls = result.get("tool_calls")
+
+    # Only save to DB if there's actual content (tool-call-only turns have no content)
+    if content:
+        add_message(conversation_id, "assistant", content, metadata={
+            "provider": result["provider"],
+            "tool_calls": tool_calls
+        })
+
+    return jsonify({
+        "session_id": str(conversation_id),  # real DB id, noel-code persists this
+        "content": content,
+        "tool_calls": tool_calls,
+        "provider": result["provider"],
+        "model": result["model"]
+    })
 
 # ============================================================
 # Application entry point
@@ -938,4 +1240,3 @@ if __name__ == "__main__":
         port=8081,
         debug=False
     )
-

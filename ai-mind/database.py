@@ -5,9 +5,11 @@ DATABASE = "ai_mind.db"
 
 
 def get_connection():
-    connection = sqlite3.connect(DATABASE)
+    connection = sqlite3.connect(DATABASE, timeout=10) 
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA journal_mode=WAL") 
+    connection.execute("PRAGMA busy_timeout=10000")
     return connection
 
 
@@ -40,6 +42,17 @@ def init_database():
             FOREIGN KEY (conversation_id)
                 REFERENCES conversations(id)
                 ON DELETE CASCADE
+        )
+    """)
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            instructions TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -89,19 +102,28 @@ def init_database():
     if not _column_exists(connection, "messages", "metadata"):
         connection.execute("ALTER TABLE messages ADD COLUMN metadata TEXT")
 
+    # Migration: add project_id column for pre-existing databases created
+    # before Projects existed. Conversations keep their history if a project
+    # is deleted; they just fall back to being unfiled (ON DELETE SET NULL).
+    if not _column_exists(connection, "conversations", "project_id"):
+        connection.execute(
+            "ALTER TABLE conversations ADD COLUMN project_id "
+            "INTEGER REFERENCES projects(id) ON DELETE SET NULL"
+        )
+
     connection.commit()
     connection.close()
 
 
-def create_conversation(title="New conversation"):
+def create_conversation(title="New conversation", project_id=None):
     connection = get_connection()
 
     cursor = connection.execute(
         """
-        INSERT INTO conversations (title)
-        VALUES (?)
+        INSERT INTO conversations (title, project_id)
+        VALUES (?, ?)
         """,
-        (title,)
+        (title, project_id)
     )
 
     conversation_id = cursor.lastrowid
@@ -173,9 +195,28 @@ def get_messages(conversation_id):
     ]
 
 
-def list_conversations(search="", limit=100):
+def list_conversations(search="", limit=100, project_id=None):
+    """
+    List conversations, most recently updated first.
+
+    When project_id is given, only conversations belonging to that
+    project are returned. Otherwise every conversation is returned
+    (unfiled and project-owned alike), each tagged with its project_id
+    / project_name so callers can render a project badge without a
+    second lookup.
+    """
+
     search_term = f"%{search.strip()}%"
     connection = get_connection()
+
+    params = [search.strip(), search_term, search_term]
+    project_filter_sql = ""
+
+    if project_id is not None:
+        project_filter_sql = "AND c.project_id = ?"
+        params.append(project_id)
+
+    params.append(limit)
 
     rows = connection.execute(
         f"""
@@ -197,6 +238,8 @@ def list_conversations(search="", limit=100):
             END AS title,
             c.created_at,
             c.updated_at,
+            c.project_id AS project_id,
+            p.name AS project_name,
             COUNT(m.id) AS message_count,
             COALESCE(
                 (
@@ -211,17 +254,19 @@ def list_conversations(search="", limit=100):
             ) AS preview
         FROM conversations c
         LEFT JOIN messages m ON m.conversation_id = c.id
+        LEFT JOIN projects p ON p.id = c.project_id
         WHERE (? = '' OR c.title LIKE ? OR EXISTS (
             SELECT 1
             FROM messages matching_message
             WHERE matching_message.conversation_id = c.id
               AND matching_message.content LIKE ?
         ))
+        {project_filter_sql}
         GROUP BY c.id
         ORDER BY c.updated_at DESC, c.id DESC
         LIMIT ?
         """,
-        (search.strip(), search_term, search_term, limit)
+        params
     ).fetchall()
 
     connection.close()
@@ -234,7 +279,7 @@ def get_conversation(conversation_id):
     row = connection.execute(
         """
         SELECT
-            id,
+            conversations.id,
             CASE
                 WHEN title = 'New conversation' THEN COALESCE(
                     (
@@ -250,7 +295,12 @@ def get_conversation(conversation_id):
                 ELSE title
             END AS title,
             created_at,
-            updated_at
+            updated_at,
+            project_id,
+            (
+                SELECT name FROM projects
+                WHERE projects.id = conversations.project_id
+            ) AS project_name
         FROM conversations
         WHERE id = ?
         """,
@@ -258,6 +308,22 @@ def get_conversation(conversation_id):
     ).fetchone()
     connection.close()
     return dict(row) if row else None
+
+
+def set_conversation_project(conversation_id, project_id):
+    """Attach (or detach, when project_id is None) a conversation to a project."""
+    connection = get_connection()
+    cursor = connection.execute(
+        """
+        UPDATE conversations
+        SET project_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (project_id, conversation_id)
+    )
+    connection.commit()
+    connection.close()
+    return cursor.rowcount > 0
 
 
 def rename_conversation(conversation_id, title):
@@ -284,6 +350,129 @@ def delete_conversation(conversation_id):
     connection.commit()
     connection.close()
     return cursor.rowcount > 0
+
+
+# ============================================================
+# Projects
+# ============================================================
+
+def create_project(name, description="", instructions=""):
+    connection = get_connection()
+
+    cursor = connection.execute(
+        """
+        INSERT INTO projects (name, description, instructions)
+        VALUES (?, ?, ?)
+        """,
+        (name, description, instructions)
+    )
+
+    project_id = cursor.lastrowid
+
+    connection.commit()
+    connection.close()
+
+    return project_id
+
+
+def list_projects():
+    connection = get_connection()
+
+    rows = connection.execute(
+        """
+        SELECT
+            p.id,
+            p.name,
+            p.description,
+            p.instructions,
+            p.created_at,
+            p.updated_at,
+            COUNT(c.id) AS conversation_count
+        FROM projects p
+        LEFT JOIN conversations c ON c.project_id = p.id
+        GROUP BY p.id
+        ORDER BY p.updated_at DESC, p.id DESC
+        """
+    ).fetchall()
+
+    connection.close()
+
+    return [dict(row) for row in rows]
+
+
+def get_project(project_id):
+    connection = get_connection()
+
+    row = connection.execute(
+        """
+        SELECT id, name, description, instructions, created_at, updated_at
+        FROM projects
+        WHERE id = ?
+        """,
+        (project_id,)
+    ).fetchone()
+
+    connection.close()
+
+    return dict(row) if row else None
+
+
+def update_project(project_id, name=None, description=None, instructions=None):
+    """
+    Update only the fields that are not None, so callers can send a
+    partial payload (e.g. just new instructions) without clobbering
+    the rest.
+    """
+
+    connection = get_connection()
+
+    current = connection.execute(
+        "SELECT name, description, instructions FROM projects WHERE id = ?",
+        (project_id,)
+    ).fetchone()
+
+    if not current:
+        connection.close()
+        return False
+
+    connection.execute(
+        """
+        UPDATE projects
+        SET name = ?,
+            description = ?,
+            instructions = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            name if name is not None else current["name"],
+            description if description is not None else current["description"],
+            instructions if instructions is not None else current["instructions"],
+            project_id
+        )
+    )
+
+    connection.commit()
+    connection.close()
+
+    return True
+
+
+def delete_project(project_id):
+    """
+    Delete a project. Conversations that belonged to it are kept and
+    simply become unfiled (project_id is set to NULL by the
+    ON DELETE SET NULL foreign key on conversations.project_id).
+    """
+    connection = get_connection()
+    cursor = connection.execute(
+        "DELETE FROM projects WHERE id = ?",
+        (project_id,)
+    )
+    connection.commit()
+    connection.close()
+    return cursor.rowcount > 0
+
 
 def add_memory(content, memory_type="general", confidence=0.5):
     connection = get_connection()

@@ -1,0 +1,796 @@
+
+================================================================================
+  PROVIDER : GROQ
+  MODEL    : openai/gpt-oss-120b
+================================================================================
+
+────────────────────────────────────────────────────────────
+  [1] MODEL OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "openai/gpt-oss-120b",
+  "created": 1754408224,
+  "object": "model",
+  "owned_by": "OpenAI",
+  "shutdown_date": null,
+  "active": true,
+  "context_window": 131072,
+  "public_apps": null,
+  "max_completion_tokens": 65536,
+  "hugging_face_id": "openai/gpt-oss-120b",
+  "name": "GPT OSS 120B",
+  "input_modalities": [
+    "text"
+  ],
+  "output_modalities": [
+    "text"
+  ],
+  "context_length": 131072,
+  "max_output_length": 65536,
+  "pricing": {
+    "prompt": "0.00000015",
+    "completion": "0.0000006",
+    "image": "0",
+    "request": "0",
+    "input_cache_read": "0.000000075"
+  },
+  "supported_sampling_parameters": [
+    "temperature",
+    "top_p",
+    "stop",
+    "seed",
+    "max_tokens"
+  ],
+  "supported_features": [
+    "tools",
+    "json_mode",
+    "structured_outputs",
+    "reasoning"
+  ]
+}
+
+────────────────────────────────────────────────────────────
+  [2] RESPONSE HEADERS
+────────────────────────────────────────────────────────────
+  alt-svc                                            : h3=":443"; ma=86400
+  cache-control                                      : private, max-age=0, no-store, no-cache, must-revalidate
+  cf-cache-status                                    : DYNAMIC
+  cf-ray                                             : a41cc76d1de1671e-AMS
+  connection                                         : keep-alive
+  content-encoding                                   : gzip
+  content-type                                       : application/json
+  date                                               : Sun, 27 Sep 2026 19:05:17 GMT
+  server                                             : cloudflare
+  strict-transport-security                          : max-age=15552000
+  transfer-encoding                                  : chunked
+  vary                                               : Origin
+  via                                                : 1.1 google
+  x-groq-region                                      : fra
+  x-ratelimit-limit-requests                         : 1000
+  x-ratelimit-limit-tokens                           : 8000
+  x-ratelimit-remaining-requests                     : 999
+  x-ratelimit-remaining-tokens                       : 7921
+  x-ratelimit-reset-requests                         : 1m26.4s
+  x-ratelimit-reset-tokens                           : 592ms
+  x-request-id                                       : req_01m3j43r20ewba9qmb587zbmg3
+
+────────────────────────────────────────────────────────────
+  [3] COMPLETION OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "chatcmpl-235f3e83-b30b-4ded-81e4-855df03a2e59",
+  "choices": [
+    {
+      "finish_reason": "length",
+      "index": 0,
+      "logprobs": null,
+      "message": {
+        "content": "",
+        "refusal": null,
+        "role": "assistant",
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "tool_calls": null,
+        "reasoning": "The user"
+      }
+    }
+  ],
+  "created": 1790535917,
+  "model": "openai/gpt-oss-120b",
+  "object": "chat.completion",
+  "metadata": null,
+  "moderation": null,
+  "service_tier": "on_demand",
+  "system_fingerprint": "fp_27194a498a",
+  "usage": {
+    "completion_tokens": 5,
+    "prompt_tokens": 74,
+    "total_tokens": 79,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 3,
+      "rejected_prediction_tokens": null,
+      "text_tokens": null
+    },
+    "prompt_tokens_details": null,
+    "queue_time": 0.301400042,
+    "prompt_time": 0.002980358,
+    "completion_time": 0.010314603,
+    "total_time": 0.013294961
+  },
+  "usage_breakdown": null,
+  "x_groq": {
+    "id": "req_01m3j43r20ewba9qmb587zbmg3",
+    "seed": 1746196031
+  }
+}
+
+
+================================================================================
+  PROVIDER : GEMINI
+  MODEL    : models/gemini-flash-lite-latest
+================================================================================
+
+────────────────────────────────────────────────────────────
+  [1] MODEL OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "models/gemini-flash-lite-latest",
+  "created": null,
+  "object": "model",
+  "owned_by": "google",
+  "shutdown_date": null,
+  "display_name": "Gemini Flash-Lite Latest"
+}
+
+────────────────────────────────────────────────────────────
+  [2] RESPONSE HEADERS
+────────────────────────────────────────────────────────────
+  alt-svc                                            : h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+  cache-control                                      : private
+  content-encoding                                   : gzip
+  content-type                                       : application/json
+  date                                               : Sun, 27 Sep 2026 19:05:18 GMT
+  expires                                            : Sun, 27 Sep 2026 19:05:18 GMT
+  p3p                                                : CP="This is not a P3P policy! See g.co/p3phelp for more info."
+  server                                             : scaffolding on HTTPServer2
+  server-timing                                      : gfet4t7; dur=739
+  set-cookie                                         : NID=CvoBCAESrAEBOxGDSBnruIignMyeO3vht7WGbvUSlpYRP8Ld-gPqWpGxq0Vs3VlMGh2Dk3sdjCvgiZ_g6L9qtAPa4_yRN8Q8WCKksIWEzPNF2txTczDGp1Tcner2U3fyMoGTLPMhuAPxYZ8s1dusQzZJT4P0MIzUUXRkPCrLyBEEGwvbpJwG-1Hl6HxhwBbHfCy_a54GhpvVpTPLlkjfowwUzjdXVW_IbTDNRoFP5cvmDLK2KAEyRQHSrAfP7sbUk0I10sqE58B22mil9PYu0mtC3cm_bHl9pC-dREpAkxGCzFw3Z2N3MBP6vdhBbEuMgCOBZPIHQDEtdFQkCQ; expires=Mon, 29-Mar-2027 19:05:18 GMT; path=/; domain=.generativelanguage.googleapis.com; HttpOnly
+  transfer-encoding                                  : chunked
+  vary                                               : Origin, X-Origin, Referer
+  x-content-type-options                             : nosniff
+  x-frame-options                                    : SAMEORIGIN
+  x-xss-protection                                   : 0
+
+────────────────────────────────────────────────────────────
+  [3] COMPLETION OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "7mi5auWODP-bvdIPoort0QQ",
+  "choices": [
+    {
+      "finish_reason": "length",
+      "index": 0,
+      "logprobs": null,
+      "message": {
+        "content": "ok",
+        "refusal": null,
+        "role": "assistant",
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "tool_calls": null,
+        "extra_content": {
+          "google": {
+            "thought_signature": "EmAKXgFpFH0TG1v9iviNyAsr27L93afkGtIJhQS4VTG4b7V+m0yZPxxtKrhVRR3OkJfb/wGHyRCIbAD3LWO6qtAfs/Mm7XGUdmw5qQHFJ7o7DXtLWu9ISsHggFBIlRBufSY="
+          }
+        }
+      }
+    }
+  ],
+  "created": 1790535918,
+  "model": "models/gemini-flash-lite-latest",
+  "object": "chat.completion",
+  "metadata": null,
+  "moderation": null,
+  "service_tier": null,
+  "system_fingerprint": null,
+  "usage": {
+    "completion_tokens": 1,
+    "prompt_tokens": 4,
+    "total_tokens": 5,
+    "completion_tokens_details": null,
+    "prompt_tokens_details": null
+  }
+}
+
+
+================================================================================
+  PROVIDER : CLOUDFLARE
+  MODEL    : @cf/meta/llama-3.1-8b-instruct-fp8
+================================================================================
+
+────────────────────────────────────────────────────────────
+  [1] MODEL OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "9b9c87c6-d4b7-494c-b177-87feab5904db",
+  "source": 1,
+  "name": "@cf/meta/llama-3.1-8b-instruct-fp8",
+  "description": "Llama 3.1 8B quantized to FP8 precision",
+  "task": {
+    "id": "c329a1f9-323d-4e91-b2aa-582dd4188d34",
+    "name": "Text Generation",
+    "description": "Family of generative text models, such as large language models (LLM), that can be adapted for a variety of natural language tasks."
+  },
+  "created_at": "2024-07-25 17:28:43.328",
+  "tags": [],
+  "properties": [
+    {
+      "property_id": "price",
+      "value": [
+        {
+          "unit": "per M input tokens",
+          "price": 0.152,
+          "currency": "USD"
+        },
+        {
+          "unit": "per M output tokens",
+          "price": 0.287,
+          "currency": "USD"
+        }
+      ]
+    },
+    {
+      "property_id": "context_window",
+      "value": "32000"
+    },
+    {
+      "property_id": "terms",
+      "value": "https://github.com/meta-llama/llama-models/blob/main/models/llama3_1/LICENSE"
+    }
+  ]
+}
+
+────────────────────────────────────────────────────────────
+  [2] RESPONSE HEADERS
+────────────────────────────────────────────────────────────
+  api-version                                        : 2026-10-01.epoch
+  cache-control                                      : no-store
+  cf-ai-neurons                                      : 0.25
+  cf-auditlog-id                                     : 01a0e441-e6e0-7b46-bbfc-3c3f81a45822
+  cf-ray                                             : a41cc7779b595671-AMS
+  connection                                         : keep-alive
+  content-encoding                                   : gzip
+  content-type                                       : application/json
+  date                                               : Sun, 27 Sep 2026 19:05:19 GMT
+  server                                             : cloudflare
+  set-cookie                                         : __cf_bm=NmMENQc979Lfh3f9HMUvfiriXeUP2UC..FnOU19N6pw-1790535919.297433-1.0.1.1-Lk30EkapgRnzgcOBUw5iblJEeqF.W1eHDIJxyz97V72Wo.JjkA.S_wQOujmNGlAu1NmgfCfsDqJ_kJzgkAQU5GWSgc6cT.0._fI11Dzjp1_qQ9GhV6Q3ZRERNmt.N.4I; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.cloudflare.com; Expires=Sun, 27 Sep 2026 19:35:19 GMT
+  transfer-encoding                                  : chunked
+
+────────────────────────────────────────────────────────────
+  [3] COMPLETION OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "id-1790535919836",
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "logprobs": null,
+      "message": {
+        "content": "OK",
+        "refusal": null,
+        "role": "assistant",
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "tool_calls": null
+      }
+    }
+  ],
+  "created": 1790535919,
+  "model": "@cf/meta/llama-3.1-8b-instruct-fp8",
+  "object": "chat.completion",
+  "metadata": null,
+  "moderation": null,
+  "service_tier": null,
+  "system_fingerprint": null,
+  "usage": {
+    "completion_tokens": 2,
+    "prompt_tokens": 14,
+    "total_tokens": 16,
+    "completion_tokens_details": null,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_write_tokens": null,
+      "cached_tokens": 0,
+      "image_tokens": null,
+      "text_tokens": null
+    },
+    "neurons": 0.2451536413282156
+  }
+}
+
+
+================================================================================
+  PROVIDER : MISTRAL
+  MODEL    : mistral-code-latest
+================================================================================
+
+────────────────────────────────────────────────────────────
+  [1] MODEL OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "mistral-code-latest",
+  "created": 1790535919,
+  "object": "model",
+  "owned_by": "mistralai",
+  "shutdown_date": null,
+  "capabilities": {
+    "completion_chat": true,
+    "function_calling": true,
+    "reasoning": false,
+    "completion_fim": true,
+    "fine_tuning": false,
+    "vision": false,
+    "ocr": false,
+    "classification": false,
+    "moderation": false,
+    "audio": false,
+    "audio_transcription": false,
+    "audio_transcription_realtime": false,
+    "audio_speech": false,
+    "unified_resources": false
+  },
+  "name": "codestral-2508",
+  "description": "Our cutting-edge language model for coding released August 2025.",
+  "max_context_length": 256000,
+  "aliases": [
+    "codestral-2508",
+    "codestral-latest",
+    "mistral-code-fim-latest"
+  ],
+  "deprecation": null,
+  "deprecation_replacement_model": null,
+  "default_model_temperature": 0.3,
+  "billing_model_name": "codestral-2508",
+  "type": "base"
+}
+
+────────────────────────────────────────────────────────────
+  [2] RESPONSE HEADERS
+────────────────────────────────────────────────────────────
+  access-control-allow-origin                        : *
+  alt-svc                                            : h3=":443"; ma=86400
+  cf-cache-status                                    : DYNAMIC
+  cf-ray                                             : a41cc77c7c9e18ae-AMS
+  connection                                         : keep-alive
+  content-encoding                                   : gzip
+  content-type                                       : application/json
+  date                                               : Sun, 27 Sep 2026 19:05:20 GMT
+  mistral-correlation-id                             : 01a0e441-e9e4-7c1d-9aec-c99b7bc73527
+  server                                             : cloudflare
+  strict-transport-security                          : max-age=15552000; includeSubDomains; preload
+  transfer-encoding                                  : chunked
+  x-content-type-options                             : nosniff
+  x-envoy-upstream-service-time                      : 130
+  x-kong-proxy-latency                               : 14
+  x-kong-request-id                                  : 01a0e441-e9e4-7c1d-9aec-c99b7bc73527
+  x-kong-upstream-latency                            : 131
+  x-max-retry-attempts-reached                       : false
+  x-ratelimit-limit-req-minute                       : 125
+  x-ratelimit-limit-tokens-minute                    : 625000
+  x-ratelimit-remaining-req-minute                   : 124
+  x-ratelimit-remaining-tokens-minute                : 624989
+  x-ratelimit-tokens-query-cost                      : 11
+
+────────────────────────────────────────────────────────────
+  [3] COMPLETION OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "9d1ea52d26de4acb81c981fca99ab9a9",
+  "choices": [
+    {
+      "finish_reason": "length",
+      "index": 0,
+      "logprobs": null,
+      "message": {
+        "content": "Got it! How can",
+        "refusal": null,
+        "role": "assistant",
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "tool_calls": null
+      }
+    }
+  ],
+  "created": 1790535920,
+  "model": "mistral-code-latest",
+  "object": "chat.completion",
+  "metadata": null,
+  "moderation": null,
+  "service_tier": null,
+  "system_fingerprint": null,
+  "usage": {
+    "completion_tokens": 5,
+    "prompt_tokens": 6,
+    "total_tokens": 11,
+    "completion_tokens_details": null,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_write_tokens": null,
+      "cached_tokens": 0,
+      "image_tokens": null,
+      "text_tokens": null
+    },
+    "service_tier": "standard"
+  }
+}
+
+
+================================================================================
+  PROVIDER : HUGGINGFACE
+  MODEL    : zai-org/GLM-5.3-Flash
+================================================================================
+
+────────────────────────────────────────────────────────────
+  [1] MODEL OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "zai-org/GLM-5.3-Flash",
+  "created": 1787640194,
+  "object": "model",
+  "owned_by": "zai-org",
+  "shutdown_date": null,
+  "architecture": {
+    "input_modalities": [
+      "text",
+      "image"
+    ],
+    "output_modalities": [
+      "text"
+    ]
+  },
+  "providers": [
+    {
+      "provider": "novita",
+      "status": "live",
+      "context_length": 1048576,
+      "pricing": {
+        "input": 0.15,
+        "output": 0.5
+      },
+      "is_free": false,
+      "supports_tools": true,
+      "supports_structured_output": false,
+      "first_token_latency_ms": 1658,
+      "throughput": 38.819129354353585,
+      "is_model_author": false
+    },
+    {
+      "provider": "together",
+      "status": "live",
+      "context_length": 1048575,
+      "pricing": {
+        "input": 0.15,
+        "output": 0.5
+      },
+      "is_free": false,
+      "supports_tools": true,
+      "supports_structured_output": false,
+      "first_token_latency_ms": 204.2,
+      "throughput": 87.2572493056278,
+      "is_model_author": false
+    },
+    {
+      "provider": "fireworks-ai",
+      "status": "live",
+      "context_length": 1048576,
+      "is_free": false,
+      "supports_tools": true,
+      "supports_structured_output": true,
+      "first_token_latency_ms": 1095.6,
+      "throughput": 81.15546364741324,
+      "is_model_author": false
+    },
+    {
+      "provider": "featherless-ai",
+      "status": "live",
+      "is_free": false,
+      "is_model_author": false
+    },
+    {
+      "provider": "zai-org",
+      "status": "live",
+      "is_free": false,
+      "supports_tools": true,
+      "supports_structured_output": false,
+      "first_token_latency_ms": 2695.8,
+      "throughput": 42.99288325426245,
+      "is_model_author": true
+    },
+    {
+      "provider": "baseten",
+      "status": "live",
+      "context_length": 1048576,
+      "pricing": {
+        "input": 0.15,
+        "output": 0.5
+      },
+      "is_free": false,
+      "supports_tools": true,
+      "supports_structured_output": true,
+      "first_token_latency_ms": 503.8,
+      "throughput": 115.5834596201014,
+      "is_model_author": false
+    },
+    {
+      "provider": "deepinfra",
+      "status": "live",
+      "context_length": 1048576,
+      "pricing": {
+        "input": 0.15,
+        "output": 0.5
+      },
+      "is_free": false,
+      "supports_tools": true,
+      "supports_structured_output": true,
+      "first_token_latency_ms": 572.4,
+      "throughput": 23.735120059907892,
+      "is_model_author": false
+    }
+  ]
+}
+
+────────────────────────────────────────────────────────────
+  [2] RESPONSE HEADERS
+────────────────────────────────────────────────────────────
+  access-control-allow-origin                        : *
+  access-control-expose-headers                      : X-Repo-Commit,X-Request-Id,X-Error-Code,X-Error-Message,X-Total-Count,ETag,Link,Accept-Ranges,Content-Range,X-Linked-Size,X-Linked-ETag,X-Xet-Hash
+  connection                                         : keep-alive
+  content-length                                     : 527
+  content-type                                       : application/json
+  cross-origin-opener-policy                         : same-origin
+  date                                               : Sun, 27 Sep 2026 19:05:21 GMT
+  referrer-policy                                    : strict-origin-when-cross-origin
+  strict-transport-security                          : max-age=31536000
+  vary                                               : Origin, Origin
+  via                                                : 1.1 google, 1.1 9a81383d5a4095cd87ee33985e4b2bf8.cloudfront.net (CloudFront)
+  x-amz-cf-id                                        : wEA4mrUOJI7WBGYYi5CHfURaz6E1peFIAcLQ9FsjrC0_NZ33pyH5eA==
+  x-amz-cf-pop                                       : AMS58-P2
+  x-baseten-accepted-at                              : 1790535921095
+  x-baseten-dyn-decode-dp-rank                       : 0
+  x-baseten-dyn-prefill-dp-rank                      : 0
+  x-baseten-dyn-prefill-worker-id                    : 4610454111708469872
+  x-baseten-dyn-worker-id                            : 4610454111708469872
+  x-baseten-model-id                                 : wx4mod7q
+  x-baseten-model-prediction-attempts                : 1
+  x-baseten-model-version-id                         : 32zlz09
+  x-baseten-received-at                              : 1790535921095
+  x-baseten-request-id                               : 54ca701a0e441edc774b18f72d39d39730266
+  x-baseten-route-trail                              : ChYKDmdjcC11ZTQtcHJvZC0yKAEwAVAB
+  x-baseten-sent-at                                  : 1790535921350
+  x-baseten-session-id                               : 54ca701a0e441edc774b18f72d39d39730266
+  x-cache                                            : Miss from cloudfront
+  x-inference-provider                               : baseten
+  x-powered-by                                       : huggingface-moon
+  x-ratelimit-limit-requests                         : 2000
+  x-ratelimit-limit-tokens                           : 5000000
+  x-ratelimit-remaining-requests                     : 1000
+  x-ratelimit-remaining-tokens                       : 5000000
+  x-request-id                                       : Root=1-6ab968f0-01bbbcb97430828434c6ecae
+  x-robots-tag                                       : none
+
+────────────────────────────────────────────────────────────
+  [3] COMPLETION OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "chatcmpl-f51cc1940c0c4835a34d4ce9d64670ce",
+  "choices": [
+    {
+      "finish_reason": "length",
+      "index": 0,
+      "logprobs": null,
+      "message": {
+        "content": null,
+        "refusal": null,
+        "role": "assistant",
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "tool_calls": null,
+        "reasoning_content": "The user has sent '"
+      }
+    }
+  ],
+  "created": 1790535921,
+  "model": "zai-org/GLM-5.3-Flash",
+  "object": "chat.completion",
+  "metadata": null,
+  "moderation": null,
+  "service_tier": null,
+  "system_fingerprint": null,
+  "usage": {
+    "completion_tokens": 5,
+    "prompt_tokens": 16,
+    "total_tokens": 21,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": 2,
+      "audio_tokens": 0,
+      "reasoning_tokens": 5,
+      "rejected_prediction_tokens": 8,
+      "text_tokens": null
+    },
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cache_write_tokens": null,
+      "cached_tokens": 0,
+      "image_tokens": null,
+      "text_tokens": null
+    }
+  }
+}
+
+
+================================================================================
+  PROVIDER : OPENROUTER
+  MODEL    : stealth/space-bunny-alpha
+================================================================================
+
+────────────────────────────────────────────────────────────
+  [1] MODEL OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "stealth/space-bunny-alpha",
+  "created": 1790174884,
+  "object": null,
+  "owned_by": null,
+  "shutdown_date": null,
+  "canonical_slug": "stealth/space-bunny-alpha",
+  "hugging_face_id": null,
+  "name": "Space Bunny Alpha",
+  "description": "Space Bunny Alpha is an anonymous large model with blazing-fast inference, strong coding capabilities and native multimodal input support. It delivers adjustable reasoning effort, and a 1M-token context window. Space...",
+  "context_length": 1000000,
+  "architecture": {
+    "modality": "text+image+video->text",
+    "input_modalities": [
+      "text",
+      "image",
+      "video"
+    ],
+    "output_modalities": [
+      "text"
+    ],
+    "tokenizer": "Other",
+    "instruct_type": null
+  },
+  "pricing": {
+    "prompt": "0",
+    "completion": "0"
+  },
+  "top_provider": {
+    "context_length": 1000000,
+    "max_completion_tokens": 524288,
+    "is_moderated": false
+  },
+  "per_request_limits": null,
+  "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "reasoning_effort",
+    "response_format",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+  ],
+  "default_parameters": {},
+  "supported_voices": null,
+  "knowledge_cutoff": null,
+  "expiration_date": null,
+  "links": {
+    "details": "/api/v1/models/stealth/space-bunny-alpha/endpoints"
+  },
+  "reasoning": {
+    "mandatory": true,
+    "supported_efforts": [
+      "max",
+      "xhigh",
+      "high",
+      "medium",
+      "low"
+    ],
+    "default_effort": "max"
+  }
+}
+
+────────────────────────────────────────────────────────────
+  [2] RESPONSE HEADERS
+────────────────────────────────────────────────────────────
+  access-control-allow-origin                        : *
+  access-control-expose-headers                      : X-Generation-Id,X-Provider-Name,request-id,cf-ray
+  cf-ray                                             : a41cc786bdafb8a8-AMS
+  connection                                         : keep-alive
+  content-encoding                                   : gzip
+  content-type                                       : application/json
+  date                                               : Sun, 27 Sep 2026 19:05:22 GMT
+  permissions-policy                                 : payment=(self "https://checkout.stripe.com" "https://connect-js.stripe.com" "https://js.stripe.com" "https://*.js.stripe.com" "https://hooks.stripe.com")
+  referrer-policy                                    : no-referrer, strict-origin-when-cross-origin
+  server                                             : cloudflare
+  transfer-encoding                                  : chunked
+  x-content-type-options                             : nosniff
+  x-generation-id                                    : gen-1790535921-oGZBN2kqoF1FLAW9X0G7
+
+────────────────────────────────────────────────────────────
+  [3] COMPLETION OBJECT
+────────────────────────────────────────────────────────────
+{
+  "id": "gen-1790535921-oGZBN2kqoF1FLAW9X0G7",
+  "choices": [
+    {
+      "finish_reason": "length",
+      "index": 0,
+      "logprobs": null,
+      "message": {
+        "content": null,
+        "refusal": null,
+        "role": "assistant",
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "tool_calls": null,
+        "reasoning": "We need answer exactly",
+        "reasoning_details": [
+          {
+            "type": "reasoning.text",
+            "text": "We need answer exactly",
+            "format": "unknown",
+            "index": 0
+          }
+        ]
+      },
+      "native_finish_reason": "length"
+    }
+  ],
+  "created": 1790535921,
+  "model": "stealth/space-bunny-alpha",
+  "object": "chat.completion",
+  "metadata": null,
+  "moderation": null,
+  "service_tier": null,
+  "system_fingerprint": null,
+  "usage": {
+    "completion_tokens": 5,
+    "prompt_tokens": 159,
+    "total_tokens": 164,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": 0,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": null,
+      "text_tokens": null,
+      "image_tokens": 0
+    },
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cache_write_tokens": 0,
+      "cached_tokens": 149,
+      "image_tokens": null,
+      "text_tokens": null,
+      "video_tokens": 0
+    },
+    "cost": 0,
+    "is_byok": false,
+    "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+    }
+  },
+  "provider": "Stealth"
+}

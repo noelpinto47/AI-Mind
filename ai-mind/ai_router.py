@@ -1,11 +1,13 @@
 import os
 import time
 import threading
+import json
 from dataclasses import dataclass
 from typing import Any
 
 from dotenv import load_dotenv
 from openai import OpenAI
+from model_selector import get_best_free_models
 
 load_dotenv()
 
@@ -28,28 +30,49 @@ class AIRouter:
     Internal AI Mind message metadata is deliberately removed before
     messages are sent to external providers.
 
-    Providers are tried in configured priority order.
+    Providers are tried in configured priority order:
+
+        groq -> gemini -> cloudflare -> mistral -> huggingface -> openrouter
+
+    That default order (see _build_providers) is chosen by how far each
+    provider's free tier actually goes for a single-user assistant:
+
+      1. groq       - fastest, and by far the most generous free daily
+                      request/token allowance of the group.
+      2. gemini     - excellent quality, still a solid daily allowance.
+      3. cloudflare - usable, but the free Workers AI tier is a tiny
+                      10k-neuron/day budget (roughly 15-25 replies).
+      4. mistral    - ~1B tokens/month, but an unpublished, very low
+                      requests-per-second ceiling.
+      5. huggingface - smallest free allowance of all (~$0.10/mo in
+                      routing credit), kept as a late fallback.
+      6. openrouter - "openrouter/free", OpenRouter's own free-model
+                      router; a broad catch-all last resort.
+
+    Set AI_PROVIDER_ORDER (comma-separated provider names, e.g.
+    "gemini,groq,openrouter") to override this order without touching
+    code. Providers you don't mention keep their default relative order,
+    appended after the ones you did mention.
+
     Failed providers are temporarily put into cooldown.
     Successful providers recover automatically.
+
+    Callers (see chat()) can also pass preferred_provider to bump one
+    provider to the front of the list for a single request - e.g. to
+    honor a model the user explicitly picked in the UI - while still
+    falling back through the rest of the list automatically if it's
+    unavailable.
     """
 
     COOLDOWN_SECONDS = 60
 
     def __init__(self):
         self.lock = threading.Lock()
+        self.max_tokens = int(os.getenv("AI_MAX_TOKENS", "4096"))
+        self.test_fail_providers = { ... }
 
-        self.max_tokens = int(
-            os.getenv("AI_MAX_TOKENS", "4096")
-        )
-
-        self.test_fail_providers = {
-            provider.strip().lower()
-            for provider in os.getenv(
-                "AI_TEST_FAIL_PROVIDERS",
-                ""
-            ).split(",")
-            if provider.strip()
-        }
+        # Dynamically select best free model per provider
+        self._best_models = get_best_free_models()
 
         self.providers = self._build_providers()
 
@@ -101,124 +124,103 @@ class AIRouter:
 
         return cleaned
 
-    # ---------------------------------------------------------
-    # Provider construction
-    # ---------------------------------------------------------
-
     def _build_providers(self):
         providers = []
 
-        # -----------------------------------------------------
-        # Groq
-        # -----------------------------------------------------
         if os.getenv("GROQ_API_KEY"):
-            providers.append(
-                self._create_provider(
-                    name="groq",
-                    api_key=os.getenv("GROQ_API_KEY"),
-                    base_url="https://api.groq.com/openai/v1",
-                    model=os.getenv(
-                        "GROQ_MODEL",
-                        "openai/gpt-oss-120b"
-                    )
-                )
-            )
+            providers.append(self._create_provider(
+                name="groq",
+                api_key=os.getenv("GROQ_API_KEY"),
+                base_url="https://api.groq.com/openai/v1",          # ← must be here
+                model=os.getenv("GROQ_MODEL") or self._best_models.get("groq", "llama-3.1-8b-instant")
+            ))
 
-        # -----------------------------------------------------
-        # Gemini
-        # -----------------------------------------------------
         if os.getenv("GEMINI_API_KEY"):
-            providers.append(
-                self._create_provider(
-                    name="gemini",
-                    api_key=os.getenv("GEMINI_API_KEY"),
-                    base_url=(
-                        "https://generativelanguage.googleapis.com/"
-                        "v1beta/openai/"
-                    ),
-                    model=os.getenv(
-                        "GEMINI_MODEL",
-                        "gemini-3.8-flash"
-                    )
-                )
-            )
+            providers.append(self._create_provider(
+                name="gemini",
+                api_key=os.getenv("GEMINI_API_KEY"),
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                model=os.getenv("GEMINI_MODEL") or self._best_models.get("gemini", "models/gemini-2.5-flash")
+            ))
 
-        # -----------------------------------------------------
-        # Cloudflare Workers AI
-        # -----------------------------------------------------
-        if (
-            os.getenv("CLOUDFLARE_API_KEY")
-            and os.getenv("CLOUDFLARE_ACCOUNT_ID")
-        ):
+        if os.getenv("CLOUDFLARE_API_KEY") and os.getenv("CLOUDFLARE_ACCOUNT_ID"):
             account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+            providers.append(self._create_provider(
+                name="cloudflare",
+                api_key=os.getenv("CLOUDFLARE_API_KEY"),
+                base_url=f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
+                model=os.getenv("CLOUDFLARE_MODEL") or self._best_models.get("cloudflare", "@cf/meta/llama-3.1-8b-instruct")
+            ))
 
-            providers.append(
-                self._create_provider(
-                    name="cloudflare",
-                    api_key=os.getenv("CLOUDFLARE_API_KEY"),
-                    base_url=(
-                        f"https://api.cloudflare.com/client/v4/"
-                        f"accounts/{account_id}/ai/v1"
-                    ),
-                    model=os.getenv(
-                        "CLOUDFLARE_MODEL",
-                        "@cf/zai-org/glm-4.7-flash"
-                    )
-                )
-            )
-
-        # -----------------------------------------------------
-        # Mistral
-        # -----------------------------------------------------
         if os.getenv("MISTRAL_API_KEY"):
-            providers.append(
-                self._create_provider(
-                    name="mistral",
-                    api_key=os.getenv("MISTRAL_API_KEY"),
-                    base_url="https://api.mistral.ai/v1",
-                    model=os.getenv(
-                        "MISTRAL_MODEL",
-                        "mistral-small-latest"
-                    )
-                )
-            )
+            providers.append(self._create_provider(
+                name="mistral",
+                api_key=os.getenv("MISTRAL_API_KEY"),
+                base_url="https://api.mistral.ai/v1",
+                model=os.getenv("MISTRAL_MODEL") or self._best_models.get("mistral", "mistral-small-latest")
+            ))
 
-        # -----------------------------------------------------
-        # Hugging Face
-        # -----------------------------------------------------
         if os.getenv("HUGGINGFACE_API_KEY"):
-            providers.append(
-                self._create_provider(
-                    name="huggingface",
-                    api_key=os.getenv("HUGGINGFACE_API_KEY"),
-                    base_url="https://router.huggingface.co/v1",
-                    model=os.getenv(
-                        "HUGGINGFACE_MODEL",
-                        "openai/gpt-oss-20b"
-                    )
-                )
-            )
+            providers.append(self._create_provider(
+                name="huggingface",
+                api_key=os.getenv("HUGGINGFACE_API_KEY"),
+                base_url="https://router.huggingface.co/v1",
+                model=os.getenv("HUGGINGFACE_MODEL") or self._best_models.get("huggingface", "meta-llama/Llama-3.1-8B-Instruct")
+            ))
 
-        # -----------------------------------------------------
-        # OpenRouter
-        # -----------------------------------------------------
         if os.getenv("OPENROUTER_API_KEY"):
-            providers.append(
-                self._create_provider(
-                    name="openrouter",
-                    api_key=os.getenv("OPENROUTER_API_KEY"),
-                    base_url="https://openrouter.ai/api/v1",
-                    model=os.getenv(
-                        "OPENROUTER_MODEL",
-                        "openrouter/free"
-                    ),
-                    headers={
-                        "X-OpenRouter-Title": "Noel AI Mind"
-                    }
-                )
-            )
+            providers.append(self._create_provider(
+                name="openrouter",
+                api_key=os.getenv("OPENROUTER_API_KEY"),
+                base_url="https://openrouter.ai/api/v1",
+                model=os.getenv("OPENROUTER_MODEL") or self._best_models.get("openrouter", "meta-llama/llama-3.3-70b-instruct:free"),
+                headers={"X-OpenRouter-Title": "Noel AI Mind"}
+            ))
 
-        return providers
+        return self._apply_custom_order(providers)
+
+    def _apply_custom_order(self, providers):
+        """
+        Optionally reorder providers via AI_PROVIDER_ORDER, a
+        comma-separated list of provider names (e.g. "gemini,groq").
+
+        Providers named in the env var are moved to the front in the
+        order given. Any configured provider NOT named keeps its
+        default relative order and is appended after them. Unknown
+        names (typos, providers without an API key) are ignored.
+        """
+
+        order_env = os.getenv("AI_PROVIDER_ORDER", "").strip()
+
+        if not order_env:
+            return providers
+
+        requested_order = [
+            name.strip().lower()
+            for name in order_env.split(",")
+            if name.strip()
+        ]
+
+        by_name = {
+            provider["state"].name: provider
+            for provider in providers
+        }
+
+        ordered = []
+
+        for name in requested_order:
+            provider = by_name.pop(name, None)
+            if provider is not None:
+                ordered.append(provider)
+
+        # Anything left over keeps its original relative order.
+        ordered.extend(
+            provider
+            for provider in providers
+            if provider["state"].name in by_name
+        )
+
+        return ordered
 
     def _create_provider(
         self,
@@ -282,13 +284,23 @@ class AIRouter:
     def chat(
         self,
         messages: list[dict[str, Any]],
-        max_tokens: int | None = None
+        max_tokens: int | None = None,
+        preferred_provider: str | None = None,
+        tools = None
     ):
         """
         Send a chat request through the provider pool.
 
         Internal message metadata is stripped before the request
         is sent to any external provider.
+
+        preferred_provider (optional): a provider name (e.g. "groq",
+        "gemini") to try first for this one request, such as a model
+        the user explicitly picked in the UI. If that provider is
+        unavailable or fails, the router still falls back through
+        the rest of the providers in their normal order - a
+        preference never turns into a hard failure by itself. An
+        unrecognized name is ignored and the default order is used.
 
         Returns:
 
@@ -330,7 +342,26 @@ class AIRouter:
         fallback_used = False
         errors = []
 
-        for provider in self.providers:
+        providers = self.providers
+
+        if preferred_provider:
+            preferred_provider = preferred_provider.strip().lower()
+
+            preferred = [
+                provider
+                for provider in providers
+                if provider["state"].name == preferred_provider
+            ]
+
+            if preferred:
+                rest = [
+                    provider
+                    for provider in providers
+                    if provider["state"].name != preferred_provider
+                ]
+                providers = preferred + rest
+
+        for provider in providers:
             client = provider["client"]
             state = provider["state"]
 
@@ -368,8 +399,18 @@ class AIRouter:
                 response = client.chat.completions.create(
                     model=state.model,
                     messages=api_messages,
-                    max_tokens=max_tokens
+                    max_tokens=max_tokens,
+                    tools=tools if tools else None,
+                    tool_choice="auto" if tools else None
                 )
+
+                tool_calls = None
+                choice = response.choices[0]
+                if choice.message.tool_calls:
+                    tool_calls = [
+                        {"name": tc.function.name, "arguments": json.loads(tc.function.arguments), "id": tc.id}
+                        for tc in choice.message.tool_calls
+                    ]
 
                 latency_ms = round(
                     (time.perf_counter() - start) * 1000,
@@ -394,7 +435,8 @@ class AIRouter:
                     "model": state.model,
                     "latency_ms": latency_ms,
                     "fallback_used": fallback_used,
-                    "attempts": attempts
+                    "attempts": attempts,
+                    "tool_calls": tool_calls,
                 }
 
             except Exception as error:
