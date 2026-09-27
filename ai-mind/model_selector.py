@@ -1,9 +1,9 @@
 """
 model_selector.py
 -----------------
-Runs on ai-mind startup. Finds the best model per provider using the
-same scoring logic as healthcheck.py, caches the result to disk for
-24 hours, and returns a dict of provider → model_id.
+Runs on ai-mind startup. Finds the best free model per provider
+using the same scoring logic as healthcheck.py, caches the result
+to disk for 24 hours, and returns a dict of provider → model_id.
 
 Usage (in ai_router.py):
     from model_selector import get_best_free_models
@@ -20,9 +20,9 @@ from openai import OpenAI
 
 load_dotenv()
 
-CACHE_FILE = os.path.join(os.path.dirname(__file__), ".model_cache.json")
-CACHE_TTL  = 60 * 60 * 24          # 24 hours
-ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
+CACHE_FILE   = os.path.join(os.path.dirname(__file__), ".model_cache.json")
+CACHE_TTL    = 60 * 60 * 24          # 24 hours
+ACCOUNT_ID   = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
 
 SCAN_SKIP = [
     "whisper", "guard", "orpheus", "tts", "speech", "embed", "rerank",
@@ -103,6 +103,12 @@ def _is_chat_model(model_id: str) -> bool:
     return not any(s in lid for s in SCAN_SKIP)
 
 
+def _is_free(m: dict) -> bool:
+    """Return True only if the model is confirmed free (pricing_input == 0)."""
+    pi = m.get("pricing_input")
+    return pi is not None and pi == 0
+
+
 def _has_any_capability(m: dict) -> bool:
     return bool(m.get("tool_support") or m.get("vision_support") or m.get("reasoning_support"))
 
@@ -139,7 +145,7 @@ def _is_available_openrouter(raw: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Metadata extraction
+# Metadata extraction  (mirrors healthcheck.py exactly)
 # ---------------------------------------------------------------------------
 
 def _extract_meta(provider_name: str, raw: dict) -> dict:
@@ -149,6 +155,7 @@ def _extract_meta(provider_name: str, raw: dict) -> dict:
         "tool_support": False,
         "vision_support": False,
         "reasoning_support": False,
+        "pricing_input": None,
         "hf_latency_ms": None,
     }
 
@@ -158,18 +165,25 @@ def _extract_meta(provider_name: str, raw: dict) -> dict:
         m["tool_support"]      = "tools" in feats
         m["reasoning_support"] = "reasoning" in feats
         m["vision_support"]    = "image" in (raw.get("input_modalities") or [])
+        p = raw.get("pricing") or {}
+        if p.get("prompt"): m["pricing_input"] = float(p["prompt"])
 
     elif provider_name == "gemini":
         m["context_length"] = raw.get("inputTokenLimit") or raw.get("context_length")
         m["tool_support"]   = "generateContent" in (raw.get("supportedGenerationMethods") or [])
 
     elif provider_name == "cloudflare":
-        m["id"]           = raw.get("name", raw.get("id", ""))
-        m["tool_support"] = True  # CF text-gen models support tools at runtime
+        m["id"]          = raw.get("name", raw.get("id", ""))
+        m["tool_support"] = True   # CF text-gen models support tools at runtime
         for prop in (raw.get("properties") or []):
-            if prop.get("property_id") == "context_window":
+            pid = prop.get("property_id")
+            if pid == "context_window":
                 try: m["context_length"] = int(prop["value"])
                 except: pass
+            elif pid == "price":
+                for entry in (prop.get("value") or []):
+                    if "input" in entry.get("unit", ""):
+                        m["pricing_input"] = entry.get("price", 0) / 1_000_000
 
     elif provider_name == "mistral":
         m["context_length"]    = raw.get("max_context_length")
@@ -185,6 +199,8 @@ def _extract_meta(provider_name: str, raw: dict) -> dict:
             ctx = [p["context_length"] for p in live if p.get("context_length")]
             if ctx: m["context_length"] = max(ctx)
             m["tool_support"] = any(p.get("supports_tools") for p in live)
+            prices = [p["pricing"]["input"] for p in live if (p.get("pricing") or {}).get("input")]
+            if prices: m["pricing_input"] = min(prices) / 1_000_000
             lats = [p["first_token_latency_ms"] for p in live if p.get("first_token_latency_ms")]
             if lats: m["hf_latency_ms"] = min(lats)
 
@@ -193,36 +209,35 @@ def _extract_meta(provider_name: str, raw: dict) -> dict:
         m["vision_support"]    = "image" in (raw.get("architecture") or {}).get("input_modalities", [])
         m["tool_support"]      = "tools" in (raw.get("supported_parameters") or [])
         m["reasoning_support"] = bool(raw.get("reasoning"))
+        p = raw.get("pricing") or {}
+        try:
+            pi = float(p.get("prompt", 0) or 0)
+            if pi >= 0: m["pricing_input"] = pi
+        except (TypeError, ValueError):
+            pass
 
     return m
 
 
 # ---------------------------------------------------------------------------
-# Scoring  (pricing removed — not a factor)
+# Scoring  (same formula as healthcheck.py)
 # ---------------------------------------------------------------------------
-#
-# Weights:
-#   context_length   35  log-scaled to 1M  (bumped since pricing slot freed)
-#   tool_support     30  binary
-#   vision_support   15  binary
-#   reasoning        15  binary
-#   latency          5   lower is better (HF provider data only)
 
 def _score(m: dict) -> float:
     score = 0.0
-
     ctx = m.get("context_length") or 0
     if ctx > 0:
-        score += 35 * min(math.log10(ctx) / math.log10(1_000_000), 1.0)
-
-    if m.get("tool_support"):      score += 30
-    if m.get("vision_support"):    score += 15
-    if m.get("reasoning_support"): score += 15
-
+        score += 25 * min(math.log10(ctx) / math.log10(1_000_000), 1.0)
+    if m.get("tool_support"):      score += 25
+    if m.get("vision_support"):    score += 10
+    if m.get("reasoning_support"): score += 10
+    pi = m.get("pricing_input")
+    if pi is None:   score += 10
+    elif pi == 0:    score += 20
+    else:            score += 20 * max(0.0, 1.0 - (pi / 0.000010))
     lat = m.get("hf_latency_ms")
     if lat and lat > 0:
-        score += 5 * max(0.0, 1.0 - (lat / 5000))
-
+        score += 10 * max(0.0, 1.0 - (lat / 5000))
     return round(score, 1)
 
 
@@ -279,12 +294,14 @@ def _list_openai_compat(provider_name: str, key: str, base: str) -> list[dict]:
         "mistral":    _is_available_mistral,
         "openrouter": _is_available_openrouter,
     }.get(provider_name, _is_active)
+
     try:
         client = OpenAI(api_key=key, base_url=base)
         models = client.models.list().data
     except Exception as e:
         print(f"[ModelSelector] {provider_name} list error: {e}")
         return []
+
     out = []
     for m in models:
         if not _is_chat_model(m.id): continue
@@ -324,10 +341,10 @@ def _list_models(p: dict) -> list[dict]:
 
 def get_best_free_models(force_refresh: bool = False) -> dict[str, str]:
     """
-    Return {provider_name: best_model_id} for every configured provider.
-    Selects the highest-scoring capable model regardless of pricing.
+    Return {provider_name: best_free_model_id} for every configured provider.
+
     Result is cached to .model_cache.json for 24 hours.
-    Pass force_refresh=True to bypass the cache.
+    Pass force_refresh=True to bypass the cache (e.g. from a CLI flag).
     """
 
     if not force_refresh:
@@ -336,7 +353,7 @@ def get_best_free_models(force_refresh: bool = False) -> dict[str, str]:
             print("[ModelSelector] Using cached model selection.")
             return cached
 
-    print("[ModelSelector] Scanning providers for best models ...")
+    print("[ModelSelector] Scanning providers for best free models ...")
     result = {}
 
     for p in PROVIDERS_CONFIG:
@@ -353,17 +370,21 @@ def get_best_free_models(force_refresh: bool = False) -> dict[str, str]:
 
         models = _list_models(p)
 
-        # Keep only models with at least one capability
-        capable = [m for m in models if _has_any_capability(m)]
+        # Keep only free models with at least one capability
+        free_capable = [
+            m for m in models
+            if _is_free(m) and _has_any_capability(m)
+        ]
 
-        if not capable:
-            print(f"[ModelSelector]   {name}: no capable models found")
+        if not free_capable:
+            print(f"[ModelSelector]   {name}: no free capable models found")
             continue
 
-        for m in capable:
+        # Score and pick the best
+        for m in free_capable:
             m["score"] = _score(m)
 
-        best = max(capable, key=lambda m: m["score"])
+        best = max(free_capable, key=lambda m: m["score"])
         result[name] = best["id"]
         print(
             f"[ModelSelector]   {name}: {best['id']}  "
