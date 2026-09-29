@@ -1705,6 +1705,84 @@ dialog.settings{width:800px;height:620px;overflow:hidden}
 
 /* ========================= PROJECTS ========================= */
 
+.project-section{
+  flex:none;
+  max-height:42%;
+  margin-top:14px;
+  overflow-y:auto;
+  padding:0 2px;
+}
+.project-section[hidden]{display:none}
+.project-section-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 4px 6px 11px;
+  color:var(--muted);
+  font-size:13px;
+  font-weight:700;
+}
+.project-add{
+  width:24px;
+  height:24px;
+  display:grid;
+  place-items:center;
+  padding:0;
+  border:0;
+  border-radius:7px;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+}
+.project-add:hover{background:var(--surface-hover);color:var(--text)}
+.project-add .ico{width:15px;height:15px}
+
+.project-row{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:100%;
+  height:38px;
+  padding:0 8px 0 8px;
+  border-radius:10px;
+  color:var(--muted);
+  cursor:pointer;
+  transition:background .12s ease,color .12s ease;
+}
+.project-row:hover,
+.project-row.open{background:var(--surface-hover);color:var(--text)}
+.project-row.has-active{color:var(--text)}
+.project-row .project-folder{width:16px;height:16px;flex:none}
+.project-row.has-active .project-folder{color:var(--signal)}
+.project-row .project-chevron{
+  width:13px;
+  height:13px;
+  flex:none;
+  color:var(--muted2);
+  transition:transform .14s ease;
+}
+.project-row.open .project-chevron{transform:rotate(90deg)}
+.project-row:hover .conversation-actions,
+.project-row:focus-within .conversation-actions{opacity:1}
+
+.project-chats{margin:2px 0 6px 14px;padding-left:6px;border-left:1px solid var(--border-soft)}
+.project-chats .project-mark{display:none}
+.project-no-chats{padding:8px 11px;color:var(--muted2);font-size:13px}
+.project-more-link{
+  display:block;
+  width:100%;
+  padding:7px 11px;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:var(--muted2);
+  font-size:12.5px;
+  text-align:left;
+  cursor:pointer;
+}
+.project-more-link:hover{background:var(--surface-hover);color:var(--text)}
+
 .project-pill{
   display:flex;
   align-items:center;

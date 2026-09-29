@@ -442,6 +442,7 @@ const dom = {
   openSettings: $("#open-settings"),
   sidebarToggle: $("#mobile-history"),
   chatTitle: $("#chat-title"),
+  projectSection: $("#project-section"),
   projectPill: $("#project-pill"),
   projectPillLabel: $("#project-pill-label"),
   shareButton: $("#share-button"),
@@ -519,6 +520,7 @@ const state = {
   listToken: 0,
   settings: loadSettings(),
   pinned: new Set([].concat(store.getJSON("ai-mind-pinned", [])).map(String)),
+  projectsOpen: new Set([].concat(store.getJSON("ai-mind-projects-open", [])).map(String)),  // expanded sidebar projects (closed by default)
   feedback: store.getJSON("ai-mind-feedback", {}) || {},
   attachments: [],
   tools: {webSearch: false, deepThink: false},
@@ -1961,24 +1963,124 @@ function conversationItem(conversation) {
   return item;
 }
 
-function renderConversations() {
-  const list = dom.conversationList;
-  list.replaceChildren();
-  const query = dom.historySearch.value.trim();
-  dom.historyCount.textContent = state.conversations.length ? String(state.conversations.length) : "";
-
-  if (!state.conversations.length) {
-    list.append(h("div", {class: "conversation-empty"}, query
-      ? "No chats match your search."
-      : "No chats yet. Start a conversation and it will appear here."));
-    return;
-  }
-
-  const byRecent = [...state.conversations].sort((a, b) => {
+function sortByRecent(items) {
+  return [...items].sort((a, b) => {
     const left = parseDate(a.updated_at);
     const right = parseDate(b.updated_at);
     return (right ? right.getTime() : 0) - (left ? left.getTime() : 0);
   });
+}
+
+function toggleProject(id) {
+  const key = String(id);
+  if (state.projectsOpen.has(key)) state.projectsOpen.delete(key);
+  else state.projectsOpen.add(key);
+  store.setJSON("ai-mind-projects-open", [...state.projectsOpen]);
+  renderProjectSection();
+}
+
+function projectGroup(project) {
+  const open = state.projectsOpen.has(String(project.id));
+  const chats = sortByRecent(state.conversations.filter(conversation => sameId(conversation.project_id, project.id)));
+  const hasActive = chats.some(conversation => sameId(conversation.id, state.conversationId));
+
+  const more = h("button", {
+    type: "button",
+    class: "conversation-action",
+    title: "Project options",
+    "aria-label": `Options for ${project.name}`,
+    "aria-haspopup": "menu",
+    "aria-expanded": "false"
+  }, icon("more"));
+  more.addEventListener("click", event => {
+    event.stopPropagation();
+    openMenu(more, [
+      {label: "New chat in project", ico: "plus", onClick: () => startChatInProject(project.id, project.name)},
+      {label: "Project details", ico: "folder", onClick: () => openProjectDetail(project.id)},
+      {label: "Edit", ico: "pencil", onClick: () => { openDialog(dom.projects); renderProjects("edit", project); }},
+      {divider: true},
+      {label: "Delete", ico: "trash", danger: true, onClick: () => deleteProjectFlow(project)}
+    ], {placement: "bottom-end", minWidth: 210});
+  });
+
+  const row = h("div", {
+    class: `project-row${open ? " open" : ""}${hasActive ? " has-active" : ""}`,
+    role: "button",
+    tabindex: "0",
+    "aria-expanded": String(open),
+    title: project.name
+  },
+    icon("chevron-right", "project-chevron"),
+    icon("folder", "project-folder"),
+    h("span", {class: "conversation-title"}, project.name),
+    h("span", {class: "conversation-actions"}, more));
+  row.addEventListener("click", () => toggleProject(project.id));
+  row.addEventListener("keydown", event => {
+    if (event.target !== row) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleProject(project.id);
+    }
+  });
+
+  let body = null;
+  if (open) {
+    const rows = chats.map(conversationItem);
+    if (!rows.length) rows.push(h("div", {class: "project-no-chats"}, "No chats"));
+    else if ((project.conversation_count || 0) > chats.length) {
+      rows.push(h("button", {type: "button", class: "project-more-link", onclick: () => openProjectDetail(project.id)},
+        `View all ${project.conversation_count}`));
+    }
+    body = h("div", {class: "project-chats"}, rows);
+  }
+
+  return h("div", {class: "project-group"}, row, body);
+}
+
+function renderProjectSection() {
+  const box = dom.projectSection;
+  if (!box) return;
+  const query = dom.historySearch.value.trim();
+  if (query || !state.projects.length) {
+    box.hidden = true;
+    box.replaceChildren();
+    return;
+  }
+  box.hidden = false;
+  const add = h("button", {type: "button", class: "project-add", title: "New project", "aria-label": "New project"}, icon("plus"));
+  add.addEventListener("click", () => { openDialog(dom.projects); renderProjects("edit"); });
+  box.replaceChildren(
+    h("div", {class: "project-section-head"}, h("span", null, "Projects"), add),
+    h("div", {class: "project-tree"}, state.projects.map(projectGroup)));
+}
+
+function renderConversations() {
+  const list = dom.conversationList;
+  list.replaceChildren();
+  const query = dom.historySearch.value.trim();
+
+  // Project chats live inside their (collapsible) project in the Projects
+  // section above; "Recents" only lists chats that aren't in a project.
+  // While searching, everything is listed flat so nothing is hidden.
+  const projectIds = new Set(state.projects.map(project => String(project.id)));
+  const isInProject = conversation => conversation.project_id !== null
+    && conversation.project_id !== undefined
+    && projectIds.has(String(conversation.project_id));
+  const visible = query ? state.conversations : state.conversations.filter(conversation => !isInProject(conversation));
+
+  renderProjectSection();
+  dom.historyCount.textContent = visible.length ? String(visible.length) : "";
+
+  if (!visible.length) {
+    if (query || !state.projects.length) {
+      list.append(h("div", {class: "conversation-empty"}, query
+        ? "No chats match your search."
+        : "No chats yet. Start a conversation and it will appear here."));
+    }
+    return;
+  }
+
+  const byRecent = sortByRecent(visible);
 
   const group = (label, items) => h("section", {class: "conversation-group"},
     h("h3", {class: "conversation-group-title"}, label),
@@ -2010,6 +2112,7 @@ async function loadConversations() {
     if (token !== state.listToken) return state.conversations;
     state.conversations = data.conversations || [];
     renderConversations();
+    if (!params.get("search")) loadProjects();  // keeps sidebar chat counts fresh
     return state.conversations;
   } catch (error) {
     if (token === state.listToken && error.name !== "AbortError") renderListError(error);
@@ -2340,6 +2443,7 @@ async function loadProjects() {
   } catch (error) {
     console.error("Failed to load projects", error);
   }
+  renderConversations();
   return state.projects;
 }
 
@@ -2524,6 +2628,7 @@ async function openProjectDetail(projectId) {
   try {
     const data = await api(API.project(projectId));
     renderProjects("detail", {...data.project, conversations: data.conversations});
+    if (!dom.projects.open) openDialog(dom.projects);
   } catch (error) {
     toast(error.message, {type: "error"});
   }
@@ -2541,7 +2646,8 @@ async function deleteProjectFlow(project) {
   try {
     await api(API.project(project.id), {method: "DELETE"});
     await loadProjects();
-    renderProjects("list");
+    loadConversations();
+    if (dom.projects.open) renderProjects("list");
     if (currentConversation() && sameId(currentConversation().project_id, project.id)) {
       renderProjectPill(null);
     }
