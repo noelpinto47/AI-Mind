@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import time
 
 from flask import Flask, render_template, request, jsonify
@@ -15,6 +16,7 @@ from database import (
     create_conversation,
     add_message,
     get_messages,
+    get_conversation_summary,
     get_conversation,
     list_conversations,
     rename_conversation,
@@ -53,6 +55,27 @@ init_database()
 MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", "800"))
 
 AI_STATUS = get_ai_status()
+
+
+def parse_model_json(content):
+    """Parse JSON responses even when a model wraps them in Markdown."""
+    if not content:
+        return None
+    text = content.strip()
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+    candidates = [fenced.group(1).strip()] if fenced else []
+    candidates.append(text)
+    object_match = re.search(r"\{[\s\S]*\}", text)
+    if object_match:
+        candidates.append(object_match.group(0))
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+            if isinstance(value, dict):
+                return value
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return None
 
 
 # ============================================================
@@ -198,7 +221,8 @@ Conversation:
                     "content": prompt
                 }
             ],
-            max_tokens=500
+            max_tokens=500,
+            request_kind="background_memory",
         )
 
         content = result["content"]
@@ -206,16 +230,9 @@ Conversation:
         if not content:
             return []
 
-        # Remove markdown code fences if the model adds them
-        content = content.strip()
-
-        if content.startswith("```"):
-            content = content.replace("```json", "", 1)
-            content = content.replace("```", "", 1)
-            content = content.strip()
-
-        # Convert JSON string into a Python object
-        result_json = json.loads(content)
+        result_json = parse_model_json(content)
+        if not result_json:
+            raise ValueError("Model returned invalid JSON")
 
         candidates = result_json.get("memories", [])
 
@@ -293,7 +310,8 @@ Conversation:
                     "content": prompt
                 }
             ],
-            max_tokens=400
+            max_tokens=400,
+            request_kind="background_style",
         )
 
         content = result["content"]
@@ -301,13 +319,10 @@ Conversation:
         if not content:
             return []
 
-        content = content.strip()
-
-        if content.startswith("```"):
-            content = content.replace("```json", "", 1)
-            content = content.replace("```", "", 1).strip()
-
-        observations = json.loads(content).get("observations", [])
+        result_json = parse_model_json(content)
+        if not result_json:
+            raise ValueError("Model returned invalid JSON")
+        observations = result_json.get("observations", [])
 
         valid = []
 
@@ -443,6 +458,12 @@ def chat():
         # ----------------------------------------------------
 
         messages = get_messages(conversation_id)
+        conversation_summary = get_conversation_summary(conversation_id)
+        history_messages = (
+            messages[-8:]
+            if conversation_summary and len(messages) > 8
+            else messages
+        )
 
         # ----------------------------------------------------
         # Get approved long-term memories
@@ -538,6 +559,10 @@ Do not assume that every previous conversation is still current.
 If previous context conflicts with something the user says now,
 prefer the user's current statement.
 
+Rolling summary of this conversation:
+
+{rolling_summary}
+
 The following communication style preferences were learned from repeated
 conversation patterns. Use them when appropriate, but do not mention them
 or treat them as factual memories:
@@ -560,6 +585,11 @@ Do not invent additional facts about the user.
                 if conversation_text
                 else "No relevant previous conversations found."
             ),
+            rolling_summary=(
+                conversation_summary["summary"]
+                if conversation_summary
+                else "No rolling summary available."
+            ),
             style_text=(
                 style_text
                 if style_text
@@ -576,7 +606,7 @@ Do not invent additional facts about the user.
                 "role": "system",
                 "content": system_message
             }
-        ] + messages
+        ] + history_messages
 
         # A model of "auto" (or nothing) means: use the router's normal
         # priority order. Anything else is a provider name the user
@@ -615,7 +645,12 @@ Do not invent additional facts about the user.
                 "model": ai_result["model"],
                 "latency_ms": ai_result["latency_ms"],
                 "fallback_used": ai_result["fallback_used"],
-                "attempts": ai_result["attempts"]
+                "attempts": ai_result["attempts"],
+                "usage": {
+                    "prompt_tokens": ai_result.get("prompt_tokens"),
+                    "completion_tokens": ai_result.get("completion_tokens"),
+                    "total_tokens": ai_result.get("total_tokens"),
+                },
             }
         )
 
@@ -661,7 +696,12 @@ Do not invent additional facts about the user.
             "model": ai_result["model"],
             "latency_ms": ai_result["latency_ms"],
             "fallback_used": ai_result["fallback_used"],
-            "attempts": ai_result["attempts"]
+            "attempts": ai_result["attempts"],
+            "usage": {
+                "prompt_tokens": ai_result.get("prompt_tokens"),
+                "completion_tokens": ai_result.get("completion_tokens"),
+                "total_tokens": ai_result.get("total_tokens"),
+            },
         })
 
     except Exception as e:

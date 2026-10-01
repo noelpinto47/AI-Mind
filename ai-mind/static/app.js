@@ -1053,14 +1053,19 @@ function normalizeFollowUps(list) {
 }
 
 function normalizeMessage(raw) {
-  const usage = raw.usage && typeof raw.usage === "object" ? raw.usage : null;
+  const rawMetadata = raw.metadata && typeof raw.metadata === "object" ? raw.metadata : null;
+  const usage = raw.usage && typeof raw.usage === "object"
+    ? raw.usage
+    : (rawMetadata && rawMetadata.usage && typeof rawMetadata.usage === "object"
+      ? rawMetadata.usage
+      : null);
   // History loaded from the server (GET /api/conversation/<id>) carries
   // router info nested under `metadata` (see database.py get_messages),
   // not at the top level the way a fresh /api/chat response does. Without
   // this, the provider/model badge would render right after sending a
   // message but vanish the moment the conversation reloads from history
   // (e.g. after switching tabs and coming back to a backgrounded page).
-  const metadata = raw.metadata && typeof raw.metadata === "object" ? raw.metadata : null;
+  const metadata = rawMetadata;
   return {
     id: raw.id ?? null,
     role: raw.role === "user" ? "user" : "assistant",
@@ -1281,6 +1286,17 @@ function makeCollapsible(body, box) {
   box.append(toggle);
 }
 
+function estimateTokens(text) {
+  if (!text) return 0;
+  return Math.max(1, Math.ceil(String(text).trim().length / 4));
+}
+
+function tokenLabel(tokens) {
+  if (!Number.isFinite(Number(tokens)) || Number(tokens) <= 0) return null;
+  const count = Math.round(Number(tokens));
+  return `${count} token${count === 1 ? "" : "s"}`;
+}
+
 /* ---- User messages ---------------------------------------------------------- */
 
 function renderUserMessage(message, animate) {
@@ -1298,6 +1314,9 @@ function renderUserMessage(message, animate) {
   }
 
   wrap.append(h("div", {class: "message-actions", role: "group", "aria-label": "Message actions"},
+    h("span", {class: "token-count user-token-count", "aria-label": "Input tokens"},
+      tokenLabel(message.usage && (message.usage.input_tokens ?? message.usage.prompt_tokens)) ||
+      tokenLabel(estimateTokens(text || message.content)) || ""),
     h("span", {class: "message-details"}, message.created_at ? h("span", null, timeOf(message.created_at)) : null),
     copyAction(() => text || message.content),
     actionButton({ico: "pencil", label: "Edit message", cls: "act-edit", feature: "editMessage", onClick: () => startEdit(message)})));
@@ -1431,8 +1450,16 @@ function syncDetails(node, message) {
   if (message.created_at) parts.push(timeOf(message.created_at));
   if (message.latencyMs) parts.push(formatDuration(message.latencyMs));
   const tokens = message.usage && (message.usage.output_tokens ?? message.usage.completion_tokens);
-  if (tokens) parts.push(`${tokens} tokens`);
+  const displayedTokens = tokens || (message.content ? estimateTokens(message.content) : 0);
+  if (displayedTokens) parts.push(tokenLabel(displayedTokens));
   parts.forEach(part => details.append(h("span", null, part)));
+
+  const tokenCount = $(".output-token-count", node);
+  if (tokenCount) {
+    tokenCount.textContent = tokenLabel(displayedTokens) || "";
+    tokenCount.hidden = !displayedTokens;
+    tokenCount.title = tokens ? "Output tokens reported by the provider" : "Estimated output tokens";
+  }
 }
 
 function updateAssistantNode(node, message, {streaming = false} = {}) {
@@ -1467,6 +1494,7 @@ function renderAssistantMessage(message, animate) {
     actionButton({ico: "volume", label: "Read aloud", cls: "act-speak", onClick: button => toggleSpeech(message, button)}),
     actionButton({ico: "refresh", label: "Regenerate", cls: "act-regenerate", feature: "regenerate", onClick: () => regenerate(message)}),
     h("span", {class: "ai-badge"}),
+    h("span", {class: "token-count output-token-count", "aria-label": "Output tokens", hidden: true}),
     h("span", {class: "message-details"}));
   const wrap = h("div", {class: "message-content-wrap"},
     content, actions, h("div", {class: "followups-slot"}), h("div", {class: "stopped-note"}, "Response stopped"));
@@ -1772,6 +1800,7 @@ async function sendMessage(content, {regenerate = false, editIndex = null, files
     userMessage = {
       role: "user",
       content,
+      usage: {input_tokens: estimateTokens(content)},
       created_at: new Date().toISOString(),
       attachments: files.filter(file => file.kind !== "text")
     };

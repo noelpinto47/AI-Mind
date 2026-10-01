@@ -1,5 +1,6 @@
 import json
 import re
+import re
 
 from ai_router import ai_router
 from database import get_memories
@@ -125,10 +126,25 @@ def _parse_memory_ids(response, valid_ids, limit):
     Only IDs that actually exist in the database are accepted.
     """
 
-    try:
-        data = json.loads(response)
-    except (json.JSONDecodeError, TypeError):
-        return []
+    text = (response or "").strip()
+    fenced = re.search(
+        r"```(?:json)?\s*([\s\S]*?)\s*```",
+        text,
+        re.IGNORECASE,
+    )
+    candidates = [fenced.group(1).strip()] if fenced else []
+    candidates.append(text)
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        candidates.append(match.group(0))
+
+    data = None
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+            break
+        except (json.JSONDecodeError, TypeError):
+            continue
 
     if not isinstance(data, dict):
         return []
@@ -208,7 +224,8 @@ def retrieve_relevant_memories(user_message, limit=DEFAULT_LIMIT):
                     "content": prompt
                 }
             ],
-            max_tokens=300
+            max_tokens=300,
+            request_kind="retrieval",
         )
 
         response = result.get("content", "")

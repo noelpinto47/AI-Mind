@@ -13,6 +13,7 @@ Usage (in ai_router.py):
 import os
 import json
 import math
+import re
 import time
 import requests
 from dotenv import load_dotenv
@@ -22,6 +23,8 @@ load_dotenv()
 
 CACHE_FILE   = os.path.join(os.path.dirname(__file__), ".model_cache.json")
 CACHE_TTL    = 60 * 60 * 24          # 24 hours
+CACHE_VERSION = 4
+MODEL_FAILURE_TTL = 60 * 60 * 8
 ACCOUNT_ID   = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
 
 SCAN_SKIP = [
@@ -79,17 +82,33 @@ def _load_cache() -> dict | None:
     try:
         with open(CACHE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if time.time() - data.get("timestamp", 0) < CACHE_TTL:
-            return data.get("models")
+        if (
+            data.get("version") == CACHE_VERSION
+            and time.time() - data.get("timestamp", 0) < CACHE_TTL
+            and isinstance(data.get("models"), dict)
+            and all(isinstance(model, str) and model for model in data["models"].values())
+        ):
+            rejected = data.get("rejected", {})
+            if not isinstance(rejected, dict):
+                rejected = {}
+            return {
+                "models": data["models"],
+                "rejected": rejected,
+            }
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
         pass
     return None
 
 
-def _save_cache(models: dict):
+def _save_cache(models: dict, rejected: dict):
     try:
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"timestamp": time.time(), "models": models}, f, indent=2)
+            json.dump({
+                "version": CACHE_VERSION,
+                "timestamp": time.time(),
+                "models": models,
+                "rejected": rejected,
+            }, f, indent=2)
     except Exception as e:
         print(f"[ModelSelector] Cache write failed: {e}")
 
@@ -335,26 +354,102 @@ def _list_models(p: dict) -> list[dict]:
     return _list_openai_compat(name, key, base)
 
 
+def _normalise_model_id(provider_name: str, model_id: str) -> str:
+    if provider_name == "gemini":
+        return model_id.removeprefix("models/")
+    return model_id
+
+
+def _probe_model(provider: dict, model_id: str) -> tuple[bool, str]:
+    """Confirm connectivity and basic structured/code formatting ability."""
+    model_id = _normalise_model_id(provider["name"], model_id)
+    client = OpenAI(api_key=provider["key"], base_url=provider["base"])
+    try:
+        response = client.chat.completions.create(
+            model=model_id,
+            messages=[{
+                "role": "user",
+                "content": (
+                    'Return exactly two parts and nothing else. First output this '
+                    'JSON object on one line: {"ok": true}. Then output this '
+                    'Python fenced code block on its own lines:\n'
+                    "```python\nprint('ok')\n```"
+                ),
+            }],
+            max_tokens=40,
+            timeout=20,
+        )
+        content = response.choices[0].message.content
+        if not content or not content.strip():
+            return False, "empty response"
+
+        json_match = re.search(r"\{[^{}]*\}", content)
+        if not json_match:
+            return False, "structured JSON response test failed"
+        try:
+            parsed = json.loads(json_match.group(0))
+        except json.JSONDecodeError:
+            return False, "invalid JSON response"
+        if parsed.get("ok") is not True:
+            return False, "JSON response did not contain ok=true"
+
+        if not re.search(r"```python\s+print\(['\"]ok['\"]\)\s+```", content, re.IGNORECASE):
+            return False, "Markdown Python code-block test failed"
+
+        return True, "ok"
+    except Exception as error:
+        return False, str(error)
+
+
+def _should_remember_failure(detail: str) -> bool:
+    lowered = detail.lower()
+    return (
+        "429" in lowered
+        or "rate limit" in lowered
+        or "rate_limited" in lowered
+        or "403" in lowered
+        or "404" in lowered
+        or "model_not_found" in lowered
+        or "empty response" in lowered
+        or "structured JSON" in detail
+        or "invalid JSON" in detail
+        or "Markdown Python" in detail
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def get_best_free_models(force_refresh: bool = False) -> dict[str, str]:
+def get_best_free_models(
+    force_refresh: bool = False,
+    on_model_selected=None,
+) -> dict[str, str]:
     """
     Return {provider_name: best_free_model_id} for every configured provider.
 
-    Result is cached to .model_cache.json for 24 hours.
-    Pass force_refresh=True to bypass the cache (e.g. from a CLI flag).
+    Each startup live-tests ranked candidates. The cache only influences
+    which candidate is tested first; it is never trusted without a probe.
     """
 
-    if not force_refresh:
-        cached = _load_cache()
-        if cached:
-            print("[ModelSelector] Using cached model selection.")
-            return cached
-
-    print("[ModelSelector] Scanning providers for best free models ...")
+    print("[ModelSelector] Scanning and live-testing providers for best free models ...")
     result = {}
+    cached_state = _load_cache() or {}
+    cached = cached_state.get("models", {})
+    rejected = cached_state.get("rejected", {})
+    now = time.time()
+
+    # Remove expired model failures before this startup's probing.
+    rejected = {
+        provider: {
+            model: failure
+            for model, failure in failures.items()
+            if isinstance(failure, dict)
+            and float(failure.get("until", 0)) > now
+        }
+        for provider, failures in rejected.items()
+        if isinstance(failures, dict)
+    }
 
     for p in PROVIDERS_CONFIG:
         name = p["name"]
@@ -373,27 +468,77 @@ def get_best_free_models(force_refresh: bool = False) -> dict[str, str]:
         # Keep only free models with at least one capability
         free_capable = [
             m for m in models
-            if _is_free(m) and _has_any_capability(m)
+            # Several provider catalogs omit pricing even though the model
+            # is covered by the provider's free API tier.
+            if (_is_free(m) or m.get("pricing_input") is None)
         ]
 
-        if not free_capable:
-            print(f"[ModelSelector]   {name}: no free capable models found")
-            continue
-
-        # Score and pick the best
+        # Probe highest-scoring models in order. Catalog metadata can be
+        # stale or include models that this account cannot access.
         for m in free_capable:
             m["score"] = _score(m)
 
-        best = max(free_capable, key=lambda m: m["score"])
-        result[name] = best["id"]
-        print(
-            f"[ModelSelector]   {name}: {best['id']}  "
-            f"(score={best['score']}, ctx={best.get('context_length')}, "
-            f"tools={'✓' if best.get('tool_support') else '✗'}, "
-            f"vision={'✓' if best.get('vision_support') else '✗'}, "
-            f"reason={'✓' if best.get('reasoning_support') else '✗'})"
-        )
+        candidates = sorted(free_capable, key=lambda m: m["score"], reverse=True)
+        configured_model = os.getenv(f"{name.upper()}_MODEL", "").strip()
+        cached_model = cached.get(name)
+        if configured_model:
+            candidates = [
+                {"id": configured_model, "score": "configured"},
+                *[m for m in candidates if m["id"] != configured_model],
+            ]
+        elif cached_model:
+            candidates = [
+                *[m for m in candidates if m["id"] == cached_model],
+                *[m for m in candidates if m["id"] != cached_model],
+            ]
 
-    _save_cache(result)
+        if not candidates:
+            print(f"[ModelSelector]   {name}: no candidate models found")
+            continue
+
+        for candidate in candidates:
+            candidate_id = _normalise_model_id(name, candidate["id"])
+            remembered = rejected.get(name, {}).get(candidate_id)
+            if remembered and not force_refresh:
+                remaining_hours = max(
+                    0,
+                    (float(remembered["until"]) - now) / 3600,
+                )
+                print(
+                    f"[ModelSelector]   {name}: {candidate_id} skipped "
+                    f"(remembered failure: {remembered.get('reason', 'unavailable')}; "
+                    f"{remaining_hours:.1f}h remaining)"
+                )
+                continue
+
+            ok, detail = _probe_model(p, candidate_id)
+            if ok:
+                result[name] = candidate_id
+                if on_model_selected:
+                    try:
+                        on_model_selected(name, candidate_id)
+                    except Exception as error:
+                        print(
+                            f"[ModelSelector]   {name}: publish failed "
+                            f"({error})"
+                        )
+                print(
+                    f"[ModelSelector]   {name}: {candidate_id} "
+                    f"(score={candidate['score']}, live=ok)"
+                )
+                break
+            print(
+                f"[ModelSelector]   {name}: {candidate_id} skipped "
+                f"({detail[:180]})"
+            )
+            if _should_remember_failure(detail):
+                rejected.setdefault(name, {})[candidate_id] = {
+                    "until": now + MODEL_FAILURE_TTL,
+                    "reason": detail[:240],
+                }
+        else:
+            print(f"[ModelSelector]   {name}: no live usable model found")
+
+    _save_cache(result, rejected)
     print(f"[ModelSelector] Done. {len(result)} provider(s) selected.")
     return result

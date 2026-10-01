@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import threading
 
 from ai_router import ai_router
@@ -12,6 +13,8 @@ from database import (
     update_memory,
     memory_exists,
     is_memory_ignored,
+    get_conversation_summary,
+    save_conversation_summary,
 )
 
 
@@ -35,6 +38,9 @@ MIN_IMPORTANCE = float(
 MAX_RECENT_MESSAGES = int(
     os.getenv("AI_MEMORY_RECENT_MESSAGES", "12")
 )
+SUMMARY_EVERY_MESSAGES = int(
+    os.getenv("AI_SUMMARY_EVERY_MESSAGES", "8")
+)
 
 
 # Prevent multiple memory jobs for the same conversation
@@ -52,17 +58,25 @@ def _clean_json_response(content):
     if not content:
         return None
 
-    content = content.strip()
-
-    if content.startswith("```"):
-        content = content.replace("```json", "", 1)
-        content = content.replace("```", "", 1)
-        content = content.strip()
-
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        return None
+    text = content.strip()
+    fenced = re.search(
+        r"```(?:json)?\s*([\s\S]*?)\s*```",
+        text,
+        re.IGNORECASE,
+    )
+    candidates = [fenced.group(1).strip()] if fenced else []
+    candidates.append(text)
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        candidates.append(match.group(0))
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+            if isinstance(value, dict):
+                return value
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return None
 
 
 def _build_conversation_text(messages):
@@ -202,6 +216,49 @@ If nothing should be remembered:
 """
 
 
+def update_conversation_summary(conversation_id, messages):
+    """Refresh a compact rolling summary only after a batch of new turns."""
+    if len(messages) < SUMMARY_EVERY_MESSAGES:
+        return False
+
+    existing = get_conversation_summary(conversation_id)
+    if existing and len(messages) - existing["message_count"] < SUMMARY_EVERY_MESSAGES:
+        return False
+
+    previous = existing["summary"] if existing else "No previous summary."
+    recent = _build_conversation_text(messages[-16:])
+    prompt = f"""
+Update a compact conversation summary for a personal AI assistant.
+Preserve durable decisions, active projects, constraints, unresolved
+questions, and user preferences. Remove greetings, repetition, and
+temporary tool output. Do not invent facts.
+
+Previous summary:
+{previous}
+
+Recent messages:
+{recent}
+
+Return only the updated summary in plain text, no headings or markdown.
+Keep it under 1200 characters.
+"""
+
+    try:
+        result = ai_router.chat(
+            [{"role": "user", "content": prompt}],
+            max_tokens=300,
+            request_kind="background_summary",
+        )
+        summary = (result.get("content") or "").strip()
+        if not summary:
+            return False
+        save_conversation_summary(conversation_id, summary[:4800], len(messages))
+        return True
+    except Exception as error:
+        print(f"[Memory Engine] Summary update failed: {error}")
+        return False
+
+
 # ============================================================
 # AI analysis
 # ============================================================
@@ -238,7 +295,8 @@ def analyze_memory(conversation_id):
                     "content": prompt
                 }
             ],
-            max_tokens=700
+            max_tokens=700,
+            request_kind="background_memory",
         )
 
         parsed = _clean_json_response(
@@ -466,6 +524,8 @@ def analyze_memory(conversation_id):
 
 def _memory_job(conversation_id):
     try:
+        messages = get_messages(conversation_id)
+        update_conversation_summary(conversation_id, messages)
         analyze_memory(conversation_id)
 
     except Exception as error:

@@ -97,6 +97,34 @@ def init_database():
         )
     """)
 
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS ai_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            request_kind TEXT NOT NULL DEFAULT 'foreground',
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            total_tokens INTEGER,
+            latency_ms REAL,
+            status TEXT NOT NULL,
+            failure_category TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS conversation_summaries (
+            conversation_id INTEGER PRIMARY KEY,
+            summary TEXT NOT NULL,
+            message_count INTEGER NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (conversation_id)
+                REFERENCES conversations(id)
+                ON DELETE CASCADE
+        )
+    """)
+
     # Migration: add metadata column for pre-existing databases created
     # before this column was introduced. Safe to run on every startup.
     if not _column_exists(connection, "messages", "metadata"):
@@ -113,6 +141,61 @@ def init_database():
 
     connection.commit()
     connection.close()
+
+
+def record_ai_usage(
+    provider,
+    model,
+    request_kind,
+    prompt_tokens,
+    completion_tokens,
+    total_tokens,
+    latency_ms,
+    status,
+    failure_category=None,
+):
+    connection = get_connection()
+    connection.execute(
+        """
+        INSERT INTO ai_usage (
+            provider, model, request_kind, prompt_tokens,
+            completion_tokens, total_tokens, latency_ms,
+            status, failure_category
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            provider,
+            model,
+            request_kind,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            latency_ms,
+            status,
+            failure_category,
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+
+def get_recent_provider_failures(provider, model, minutes=15):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT failure_category, COUNT(*) AS count
+        FROM ai_usage
+        WHERE provider = ?
+          AND model = ?
+          AND status LIKE 'failure%'
+          AND created_at >= datetime('now', ?)
+        GROUP BY failure_category
+        """,
+        (provider, model, f"-{int(minutes)} minutes"),
+    ).fetchall()
+    connection.close()
+    return {row["failure_category"]: row["count"] for row in rows}
 
 
 def create_conversation(title="New conversation", project_id=None):
@@ -193,6 +276,39 @@ def get_messages(conversation_id):
         }
         for row in rows
     ]
+
+
+def get_conversation_summary(conversation_id):
+    connection = get_connection()
+    row = connection.execute(
+        """
+        SELECT summary, message_count, updated_at
+        FROM conversation_summaries
+        WHERE conversation_id = ?
+        """,
+        (conversation_id,),
+    ).fetchone()
+    connection.close()
+    return dict(row) if row else None
+
+
+def save_conversation_summary(conversation_id, summary, message_count):
+    connection = get_connection()
+    connection.execute(
+        """
+        INSERT INTO conversation_summaries (
+            conversation_id, summary, message_count, updated_at
+        )
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(conversation_id) DO UPDATE SET
+            summary = excluded.summary,
+            message_count = excluded.message_count,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (conversation_id, summary, message_count),
+    )
+    connection.commit()
+    connection.close()
 
 
 def list_conversations(search="", limit=100, project_id=None):

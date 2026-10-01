@@ -918,16 +918,11 @@ button.file-chip:hover{background:var(--surface-hover);border-color:var(--border
   gap:2px;
   min-height:32px;
   margin-top:6px;
-  opacity:0;
-  transition:opacity .15s ease;
+  opacity:1;
 }
 .message.user .message-actions{justify-content:flex-end;margin-top:2px}
-.message:hover .message-actions,
-.message:focus-within .message-actions,
-.messages > .message:last-child .message-actions{opacity:1}
 @media (hover:none){.message-actions{opacity:1}}
 .message.is-pending .message-actions{display:none}
-.messages > .message.assistant:not(:last-child) .act-regenerate{display:none}
 
 .action{
   display:grid;
@@ -949,6 +944,18 @@ button.file-chip:hover{background:var(--surface-hover);border-color:var(--border
 .copied .ico-check{display:block}
 .copied .ico-copy{display:none}
 .action.copied{color:var(--ok)}
+
+.token-count{
+  display:inline-flex;
+  align-items:center;
+  min-height:24px;
+  padding:0 6px;
+  color:var(--muted2);
+  font-size:11px;
+  white-space:nowrap;
+}
+.user-token-count{margin-right:2px}
+.output-token-count{margin-left:2px}
 
 .message-details{
   display:none;
