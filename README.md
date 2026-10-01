@@ -387,4 +387,4 @@ The project currently relies on focused script checks and local integration chec
 
 ## License
 
-Add the project license that matches your intended distribution before publishing this repository.
+MIT License
