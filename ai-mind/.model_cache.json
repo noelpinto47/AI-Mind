@@ -1,8 +1,7 @@
 {
   "version": 4,
-  "timestamp": 1790846408.6872368,
+  "timestamp": 1790846920.2347095,
   "models": {
-    "groq": "allam-2-7b",
     "gemini": "gemini-flash-lite-latest",
     "cloudflare": "@cf/mistral/mistral-7b-instruct-v0.2-lora",
     "mistral": "labs-leanstral-1-5-1",
@@ -114,6 +113,12 @@
       "inclusionai/ling-3.0-flash-sante:free": {
         "until": 1790875174.2127683,
         "reason": "empty response"
+      }
+    },
+    "groq": {
+      "allam-2-7b": {
+        "until": 1790875542.443275,
+        "reason": "Markdown Python code-block test failed"
       }
     }
   }

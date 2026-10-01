@@ -466,7 +466,7 @@ def chat():
         )
 
         # ----------------------------------------------------
-        # Get approved long-term memories
+        # Retrieve automatically maintained long-term memories
         # ----------------------------------------------------
 
         memories = retrieve_relevant_memories(message)

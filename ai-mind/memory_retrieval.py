@@ -1,12 +1,12 @@
 import json
 import re
-import re
 
 from ai_router import ai_router
-from database import get_memories
+from database import get_memories, mark_memories_accessed
 
 
 DEFAULT_LIMIT = 5
+RERANK_LIMIT = 12
 
 
 def _normalize_text(text):
@@ -28,6 +28,28 @@ def _keyword_overlap(query, content):
         return 0.0
 
     return len(query_words & content_words) / len(query_words)
+
+
+def _local_rank(query, memories):
+    """Rank a small candidate set without spending another model request."""
+    query_words = set(re.findall(r"\b[a-zA-Z0-9_]{3,}\b", _normalize_text(query)))
+    ranked = []
+    for memory in memories:
+        lexical = _keyword_overlap(query, memory["content"])
+        type_text = _normalize_text(memory.get("memory_type", ""))
+        type_match = 0.1 if query_words & set(type_text.split("_")) else 0
+        confidence = float(memory.get("confidence") or 0)
+        importance = float(memory.get("importance") or 0.5)
+        score = (
+            0.55 * lexical
+            + 0.20 * confidence
+            + 0.20 * importance
+            + type_match
+        )
+        if lexical > 0 or type_match:
+            ranked.append((score, memory))
+    ranked.sort(key=lambda item: (item[0], item[1]["id"]), reverse=True)
+    return [memory for _, memory in ranked]
 
 
 def _fallback_retrieval(user_message, memories, limit):
@@ -201,7 +223,10 @@ def retrieve_relevant_memories(user_message, limit=DEFAULT_LIMIT):
 
     # Don't send an unnecessarily large number of memories
     # to the retrieval model.
-    candidate_memories = memories[:50]
+    ranked_memories = _local_rank(user_message, memories)
+    if not ranked_memories:
+        return []
+    candidate_memories = ranked_memories[:RERANK_LIMIT]
 
     prompt = _build_retrieval_prompt(
         user_message,
@@ -247,10 +272,12 @@ def retrieve_relevant_memories(user_message, limit=DEFAULT_LIMIT):
                 for memory in candidate_memories
             }
 
-            return [
+            selected = [
                 memory_by_id[memory_id]
                 for memory_id in selected_ids
             ]
+            mark_memories_accessed(memory["id"] for memory in selected)
+            return selected
 
         # An empty list can be a legitimate AI answer.
         # However, if the model returned malformed JSON,
@@ -268,11 +295,13 @@ def retrieve_relevant_memories(user_message, limit=DEFAULT_LIMIT):
         print(f"[Memory Retrieval] AI retrieval failed: {error}")
 
     # Final fallback: simple keyword matching.
-    return _fallback_retrieval(
+    selected = _fallback_retrieval(
         user_message,
         candidate_memories,
         limit
     )
+    mark_memories_accessed(memory["id"] for memory in selected)
+    return selected
 
 
 def format_memories_for_prompt(memories):

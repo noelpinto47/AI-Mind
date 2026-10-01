@@ -1,5 +1,7 @@
 import json
 import sqlite3
+import hashlib
+import re
 
 DATABASE = "ai_mind.db"
 
@@ -62,6 +64,16 @@ def init_database():
             content TEXT NOT NULL,
             memory_type TEXT NOT NULL DEFAULT 'general',
             confidence REAL NOT NULL DEFAULT 0.5,
+            importance REAL NOT NULL DEFAULT 0.5,
+            content_hash TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            source_conversation_id INTEGER,
+            source_message_id INTEGER,
+            valid_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            valid_until TIMESTAMP,
+            superseded_by INTEGER,
+            last_accessed_at TIMESTAMP,
+            access_count INTEGER NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -138,6 +150,31 @@ def init_database():
             "ALTER TABLE conversations ADD COLUMN project_id "
             "INTEGER REFERENCES projects(id) ON DELETE SET NULL"
         )
+
+    memory_columns = {
+        "importance": "REAL NOT NULL DEFAULT 0.5",
+        "content_hash": "TEXT",
+        "status": "TEXT NOT NULL DEFAULT 'active'",
+        "source_conversation_id": "INTEGER",
+        "source_message_id": "INTEGER",
+        "valid_from": "TIMESTAMP",
+        "valid_until": "TIMESTAMP",
+        "superseded_by": "INTEGER",
+        "last_accessed_at": "TIMESTAMP",
+        "access_count": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for column, definition in memory_columns.items():
+        if not _column_exists(connection, "memories", column):
+            connection.execute(
+                f"ALTER TABLE memories ADD COLUMN {column} {definition}"
+            )
+
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memories_hash ON memories(content_hash)"
+    )
 
     connection.commit()
     connection.close()
@@ -590,7 +627,19 @@ def delete_project(project_id):
     return cursor.rowcount > 0
 
 
-def add_memory(content, memory_type="general", confidence=0.5):
+def _memory_content_hash(content):
+    normalized = re.sub(r"\s+", " ", str(content).strip().lower())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def add_memory(
+    content,
+    memory_type="general",
+    confidence=0.5,
+    importance=0.5,
+    source_conversation_id=None,
+    source_message_id=None,
+):
     connection = get_connection()
 
     cursor = connection.execute(
@@ -598,11 +647,23 @@ def add_memory(content, memory_type="general", confidence=0.5):
         INSERT INTO memories (
             content,
             memory_type,
-            confidence
+            confidence,
+            importance,
+            content_hash,
+            source_conversation_id,
+            source_message_id
         )
-        VALUES (?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (content, memory_type, confidence)
+        (
+            content,
+            memory_type,
+            confidence,
+            importance,
+            _memory_content_hash(content),
+            source_conversation_id,
+            source_message_id,
+        )
     )
 
     memory_id = cursor.lastrowid
@@ -618,8 +679,12 @@ def get_memories():
 
     rows = connection.execute(
         """
-        SELECT id, content, memory_type, confidence
+        SELECT id, content, memory_type, confidence, importance,
+               status, source_conversation_id, source_message_id,
+               valid_from, valid_until, superseded_by,
+               last_accessed_at, access_count
         FROM memories
+        WHERE status = 'active'
         ORDER BY updated_at DESC
         """
     ).fetchall()
@@ -632,6 +697,15 @@ def get_memories():
             "content": row["content"],
             "memory_type": row["memory_type"],
             "confidence": row["confidence"]
+            ,"importance": row["importance"]
+            ,"status": row["status"]
+            ,"source_conversation_id": row["source_conversation_id"]
+            ,"source_message_id": row["source_message_id"]
+            ,"valid_from": row["valid_from"]
+            ,"valid_until": row["valid_until"]
+            ,"superseded_by": row["superseded_by"]
+            ,"last_accessed_at": row["last_accessed_at"]
+            ,"access_count": row["access_count"]
         }
         for row in rows
     ]
@@ -650,7 +724,15 @@ def delete_memory(memory_id):
     connection.commit()
     connection.close()
 
-def update_memory(memory_id, content, memory_type, confidence):
+def update_memory(
+    memory_id,
+    content,
+    memory_type,
+    confidence,
+    importance=0.5,
+    source_conversation_id=None,
+    source_message_id=None,
+):
     connection = get_connection()
 
     connection.execute(
@@ -659,14 +741,74 @@ def update_memory(memory_id, content, memory_type, confidence):
         SET content = ?,
             memory_type = ?,
             confidence = ?,
+            importance = ?,
+            content_hash = ?,
+            source_conversation_id = COALESCE(?, source_conversation_id),
+            source_message_id = COALESCE(?, source_message_id),
+            status = 'active',
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (content, memory_type, confidence, memory_id)
+        (
+            content,
+            memory_type,
+            confidence,
+            importance,
+            _memory_content_hash(content),
+            source_conversation_id,
+            source_message_id,
+            memory_id,
+        )
     )
 
     connection.commit()
     connection.close()
+
+
+def replace_memory(
+    memory_id,
+    content,
+    memory_type,
+    confidence,
+    importance=0.5,
+    source_conversation_id=None,
+    source_message_id=None,
+):
+    """Create a new version while retaining the previous fact for audit."""
+    connection = get_connection()
+    cursor = connection.execute(
+        """
+        INSERT INTO memories (
+            content, memory_type, confidence, importance, content_hash,
+            source_conversation_id, source_message_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            content,
+            memory_type,
+            confidence,
+            importance,
+            _memory_content_hash(content),
+            source_conversation_id,
+            source_message_id,
+        ),
+    )
+    new_id = cursor.lastrowid
+    connection.execute(
+        """
+        UPDATE memories
+        SET status = 'superseded',
+            valid_until = CURRENT_TIMESTAMP,
+            superseded_by = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'active'
+        """,
+        (new_id, memory_id),
+    )
+    connection.commit()
+    connection.close()
+    return new_id
 
 
 def memory_exists(content):
@@ -676,15 +818,38 @@ def memory_exists(content):
         """
         SELECT id
         FROM memories
-        WHERE LOWER(TRIM(content)) = LOWER(TRIM(?))
+        WHERE status = 'active'
+          AND (
+            content_hash = ?
+            OR LOWER(TRIM(content)) = LOWER(TRIM(?))
+          )
         LIMIT 1
         """,
-        (content,)
+        (_memory_content_hash(content), content)
     ).fetchone()
 
     connection.close()
 
     return row["id"] if row else None
+
+
+def mark_memories_accessed(memory_ids):
+    ids = sorted({int(memory_id) for memory_id in memory_ids})
+    if not ids:
+        return
+    connection = get_connection()
+    placeholders = ",".join("?" for _ in ids)
+    connection.execute(
+        f"""
+        UPDATE memories
+        SET last_accessed_at = CURRENT_TIMESTAMP,
+            access_count = access_count + 1
+        WHERE id IN ({placeholders}) AND status = 'active'
+        """,
+        ids,
+    )
+    connection.commit()
+    connection.close()
 
 def add_ignored_memory(content):
     connection = get_connection()

@@ -3403,10 +3403,9 @@ function settingsPersonalization() {
       })
     }),
     settingRow({
-      title: "Use saved memories",
-      desc: "Let replies draw on what you've approved on the Memories page.",
-      feature: "memoryToggle",
-      control: switchControl(s.memory, value => updateSetting("memory", value), "Use saved memories")
+      title: "Automatic memory",
+      desc: "AI Mind automatically builds and uses relevant memories and conversation context after each chat.",
+      control: h("span", {class: "setting-value"}, "Enabled")
     }),
     settingRow({
       title: "Manage memories",

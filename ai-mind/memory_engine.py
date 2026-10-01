@@ -10,10 +10,10 @@ from database import (
     get_memories,
     get_ignored_memories,
     add_memory,
-    update_memory,
     memory_exists,
     is_memory_ignored,
     get_conversation_summary,
+    replace_memory,
     save_conversation_summary,
 )
 
@@ -45,6 +45,7 @@ SUMMARY_EVERY_MESSAGES = int(
 
 # Prevent multiple memory jobs for the same conversation
 _active_jobs = set()
+_pending_jobs = set()
 _jobs_lock = threading.Lock()
 
 
@@ -156,6 +157,7 @@ IMPORTANT:
 - Never create a duplicate of an existing memory.
 - If an existing memory describes the same concept and the user
   provides an updated/corrected version, UPDATE that memory.
+  The previous version will be retained as superseded history.
 - Do not delete memories automatically.
 - Only create/update memories when confidence is high.
 - Maximum 2 memory actions.
@@ -419,7 +421,10 @@ def analyze_memory(conversation_id):
                 memory_id = add_memory(
                     content,
                     memory_type,
-                    confidence
+                    confidence,
+                    importance,
+                    conversation_id,
+                    None,
                 )
 
                 created.append({
@@ -467,15 +472,19 @@ def analyze_memory(conversation_id):
                     })
                     continue
 
-                update_memory(
+                new_memory_id = replace_memory(
                     memory_id,
                     content,
                     memory_type,
-                    confidence
+                    confidence,
+                    importance,
+                    conversation_id,
+                    None,
                 )
 
                 updated.append({
-                    "id": memory_id,
+                    "id": new_memory_id,
+                    "superseded_id": memory_id,
                     "content": content,
                     "type": memory_type,
                     "confidence": confidence,
@@ -534,8 +543,21 @@ def _memory_job(conversation_id):
         )
 
     finally:
+        rerun = False
         with _jobs_lock:
             _active_jobs.discard(conversation_id)
+            if conversation_id in _pending_jobs:
+                _pending_jobs.discard(conversation_id)
+                _active_jobs.add(conversation_id)
+                rerun = True
+
+        if rerun:
+            thread = threading.Thread(
+                target=_memory_job,
+                args=(conversation_id,),
+                daemon=True,
+            )
+            thread.start()
 
 
 def schedule_memory_processing(conversation_id):
@@ -551,6 +573,7 @@ def schedule_memory_processing(conversation_id):
 
     with _jobs_lock:
         if conversation_id in _active_jobs:
+            _pending_jobs.add(conversation_id)
             return
 
         _active_jobs.add(conversation_id)
