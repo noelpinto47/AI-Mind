@@ -1150,6 +1150,23 @@ button:focus:not(:focus-visible) { outline: none; }
     <div class="header-actions">
 
         <button
+            id="refresh-dashboard"
+            class="theme-toggle"
+            type="button"
+            title="Refresh dashboard"
+            aria-label="Refresh dashboard"
+        >
+            <svg viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 11a8 8 0 0 0-14.9-3.8L3 10"/>
+                <path d="M3 4v6h6"/>
+                <path d="M4 13a8 8 0 0 0 14.9 3.8L21 14"/>
+                <path d="M21 20v-6h-6"/>
+            </svg>
+        </button>
+
+        <button
             id="theme-toggle"
             class="theme-toggle"
             type="button"
@@ -1906,10 +1923,12 @@ async function updateDashboard() {
    INIT
    ========================================================== */
 
-updateDashboard();
+const refreshDashboard = document.getElementById("refresh-dashboard");
+if (refreshDashboard) {
+    refreshDashboard.addEventListener("click", updateDashboard);
+}
 
-/* refresh every 5 seconds */
-setInterval(updateDashboard, 5000);
+updateDashboard();
 
 </script>
 

@@ -572,14 +572,32 @@ def get_ai_status():
     try:
         result = subprocess.run(
             ["curl", "-s", "--max-time", "3",
-             "http://127.0.0.1:8081/api/ai-status"],
+             "http://127.0.0.1:8081/api/ai-router/status"],
             capture_output=True,
             text=True,
             timeout=5
         )
 
         if result.returncode == 0 and result.stdout.strip():
-            return json.loads(result.stdout)
+            data = json.loads(result.stdout)
+            providers = data.get("providers", [])
+            available = [
+                provider for provider in providers
+                if provider.get("available")
+            ]
+            return {
+                "available": bool(available),
+                "status": (
+                    "Available"
+                    if available
+                    else "Unavailable"
+                ),
+                "providers": len(providers),
+                "available_providers": len(available),
+                "limit": None,
+                "remaining": None,
+                "reset_at": None,
+            }
     except Exception:
         pass
 

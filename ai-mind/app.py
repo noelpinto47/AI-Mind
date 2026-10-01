@@ -6,7 +6,7 @@ import time
 from flask import Flask, render_template, request, jsonify
 from ai_router import ai_router
 from dotenv import load_dotenv
-from memory_engine import schedule_memory_processing
+from memory_engine import schedule_memory_processing, schedule_title_generation
 from memory_retrieval import retrieve_relevant_memories
 from conversation_retrieval import retrieve_relevant_conversations
 from conversation_retrieval import format_conversations_for_prompt
@@ -654,6 +654,8 @@ Do not invent additional facts about the user.
             }
         )
 
+        schedule_title_generation(conversation_id)
+
         # Automatically analyze the conversation for long-term memory.
         # This runs in the background and does not delay the response.
         schedule_memory_processing(conversation_id)
@@ -677,6 +679,7 @@ Do not invent additional facts about the user.
 
         return jsonify({
             "conversation_id": conversation_id,
+            "title": get_conversation(conversation_id)["title"],
             "response": content,
 
             # Project this conversation belongs to, if any
@@ -1176,7 +1179,7 @@ def ignore_memory():
 
 
 # ============================================================
-# Legacy AI status
+# Legacy AI status. Provider health is exposed by /api/ai-router/status.
 # ============================================================
 
 @app.route("/api/ai-status", methods=["GET"])

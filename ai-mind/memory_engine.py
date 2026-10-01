@@ -13,6 +13,9 @@ from database import (
     memory_exists,
     is_memory_ignored,
     get_conversation_summary,
+    get_conversation,
+    get_conversation_raw_title,
+    rename_conversation,
     replace_memory,
     save_conversation_summary,
 )
@@ -47,6 +50,90 @@ SUMMARY_EVERY_MESSAGES = int(
 _active_jobs = set()
 _pending_jobs = set()
 _jobs_lock = threading.Lock()
+_title_jobs = set()
+
+
+def _fallback_title(messages):
+    text = next(
+        (message["content"].strip() for message in messages if message["role"] == "user"),
+        "New conversation",
+    )
+    match = re.search(
+        r"\b(?:called|named|for|with)\s+([A-Z][A-Za-z0-9&.-]{2,}(?:\s+[A-Z][A-Za-z0-9&.-]{2,})?)",
+        text,
+    )
+    if match:
+        subject = match.group(1).strip(" .,")
+        return f"{subject} Brief"[:50]
+
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'_-]*", text)
+    stop_words = {
+        "i", "am", "we", "are", "the", "a", "an", "to", "for",
+        "and", "with", "can", "you", "help", "please", "how", "what",
+    }
+    useful = [word for word in words if word.lower() not in stop_words]
+    return " ".join(useful[:5]).strip().title()[:50] or "New conversation"
+
+
+def _generate_title(conversation_id):
+    messages = get_messages(conversation_id)
+    if not messages:
+        return
+
+    if get_conversation_raw_title(conversation_id) != "New conversation":
+        return
+
+    fallback = _fallback_title(messages)
+    rename_conversation(conversation_id, fallback)
+
+    conversation_text = "\n".join(
+        f"{message['role']}: {message['content']}"
+        for message in messages[-6:]
+    )
+    prompt = f"""
+Create a concise title for this chat.
+Return only 2 to 5 words, in Title Case, with no quotes or punctuation.
+Capture the company, project, or main task. Prefer titles like "Stryker Brief"
+or "Rust Editor Architecture", not a sentence.
+
+Conversation:
+{conversation_text}
+""".strip()
+
+    try:
+        result = ai_router.chat(
+            [{"role": "user", "content": prompt}],
+            max_tokens=24,
+            request_kind="background_title",
+        )
+        title = re.sub(r"[\r\n`\"']", "", (result.get("content") or "")).strip()
+        title = re.sub(r"[.!?]+$", "", title)
+        words = title.split()
+        if 2 <= len(words) <= 8 and len(title) <= 60:
+            rename_conversation(conversation_id, title)
+    except Exception as error:
+        print(f"[Memory Engine] Title generation failed: {error}")
+
+
+def schedule_title_generation(conversation_id):
+    if get_conversation_raw_title(conversation_id) == "New conversation":
+        messages = get_messages(conversation_id)
+        if messages:
+            rename_conversation(conversation_id, _fallback_title(messages))
+
+    with _jobs_lock:
+        if conversation_id in _title_jobs:
+            return
+        _title_jobs.add(conversation_id)
+
+    def run():
+        try:
+            _generate_title(conversation_id)
+        finally:
+            with _jobs_lock:
+                _title_jobs.discard(conversation_id)
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 # ============================================================

@@ -275,15 +275,10 @@ def add_message(conversation_id, role, content, metadata=None):
     connection.execute(
         """
         UPDATE conversations
-        SET title = CASE
-                WHEN title = 'New conversation' AND ? = 'user'
-                THEN SUBSTR(TRIM(?), 1, 80)
-                ELSE title
-            END,
-            updated_at = CURRENT_TIMESTAMP
+        SET updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (role, content, conversation_id)
+        (conversation_id,)
     )
 
     connection.commit()
@@ -461,6 +456,16 @@ def get_conversation(conversation_id):
     ).fetchone()
     connection.close()
     return dict(row) if row else None
+
+
+def get_conversation_raw_title(conversation_id):
+    connection = get_connection()
+    row = connection.execute(
+        "SELECT title FROM conversations WHERE id = ?",
+        (conversation_id,),
+    ).fetchone()
+    connection.close()
+    return row["title"] if row else None
 
 
 def set_conversation_project(conversation_id, project_id):

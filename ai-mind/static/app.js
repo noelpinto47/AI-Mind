@@ -1578,6 +1578,7 @@ function adoptConversation(reply) {
   state.conversationId = reply.conversationId;
   store.set("conversation_id", String(reply.conversationId));
   state.newChatProjectId = null;
+  if (reply.title) setTitle(reply.title);
   renderProjectPill(reply.projectId ? {id: reply.projectId, name: reply.projectName} : null);
 }
 
