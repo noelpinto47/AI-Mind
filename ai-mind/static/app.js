@@ -47,7 +47,9 @@ const API = {
   archive: id => `/api/conversations/${encodeURIComponent(id)}/archive`,
   aiRouterStatus: "/api/ai-router/status",
   projects: "/api/projects",
-  project: id => `/api/projects/${encodeURIComponent(id)}`
+  project: id => `/api/projects/${encodeURIComponent(id)}`,
+  prompts: "/api/prompts",
+  prompt: id => `/api/prompts/${encodeURIComponent(id)}`
 };
 
 const FEATURES = {
@@ -134,9 +136,9 @@ const FEATURES = {
     hint: "GET/POST /api/projects, GET/PATCH/DELETE /api/projects/<id>. Instructions are injected into the system prompt server-side."
   },
   promptLibrary: {
-    on: false,
+    on: true,
     label: "Prompt library",
-    hint: "Saved prompts. Listen for the aimind:feature event. Slash templates already work."
+    hint: "Curated and personal prompts are available from the sidebar and slash menu."
   }
 };
 
@@ -191,6 +193,8 @@ const PROMPTS = [
   {id: "plan", title: "Make a plan", text: "Turn this into a step-by-step plan with milestones and risks:\n\n"},
   {id: "compare", title: "Compare options", text: "Compare these options in a table and recommend one:\n\n"}
 ];
+
+let libraryPrompts = [];
 
 const SHORTCUTS = [
   {keys: "mod+k", label: "Search chats and actions"},
@@ -486,6 +490,11 @@ const dom = {
   confirm: $("#confirm-dialog"),
   palette: $("#palette-dialog"),
   projects: $("#projects-dialog"),
+  promptLibrary: $("#prompt-library-dialog"),
+  promptLibraryView: $("#prompt-library-view"),
+  chatLayout: $("#chat-layout"),
+  topbar: $(".topbar"),
+  chatBody: $(".chat-body"),
   paletteInput: $("#palette-input"),
   paletteList: $("#palette-list")
 };
@@ -1108,7 +1117,7 @@ function truncateFrom(index) {
 function setTitle(title) {
   state.title = title || "New chat";
   dom.chatTitle.textContent = state.title;
-  document.title = state.title === "New chat" ? "AI Mind" : `${state.title} – AI Mind`;
+  document.title = state.title === "New chat" ? "AI Mind" : `AI Mind - ${state.title}`;
 }
 
 /* ---- Scrolling ------------------------------------------------------ */
@@ -2162,6 +2171,7 @@ function resetToNewChat() {
 }
 
 function newChat() {
+  showChatView();
   stopGenerating();
   stopSpeech();
   saveDraft();
@@ -2794,7 +2804,8 @@ function updateSlash() {
     return;
   }
   const query = match[1].toLowerCase();
-  slash.items = PROMPTS.filter(prompt => prompt.id.startsWith(query) || prompt.title.toLowerCase().includes(query));
+  const prompts = [...PROMPTS, ...promptLibraryItems()];
+  slash.items = prompts.filter(prompt => prompt.id.startsWith(query) || prompt.title.toLowerCase().includes(query));
   if (!slash.items.length) {
     closeSlash();
     return;
@@ -2807,6 +2818,153 @@ function updateSlash() {
 function applySlash(prompt) {
   closeSlash();
   fillPrompt(prompt.text);
+}
+
+function promptLibraryItems() {
+  return libraryPrompts.map(prompt => ({
+    id: `library-${prompt.id}`,
+    title: prompt.title,
+    text: prompt.prompt,
+    libraryId: prompt.id
+  }));
+}
+
+async function loadPromptLibrary() {
+  try {
+    const data = await api(API.prompts);
+    libraryPrompts = data.prompts || [];
+    return libraryPrompts;
+  } catch (error) {
+    console.warn("[AI Mind] Prompt library unavailable:", error);
+    return [];
+  }
+}
+
+function promptCard(prompt) {
+  const source = prompt.source_url
+    ? h("a", {
+        class: "prompt-source",
+        href: prompt.source_url,
+        target: "_blank",
+        rel: "noopener noreferrer"
+      }, prompt.source_name || "Source")
+    : h("span", {class: "prompt-source"}, "Personal prompt");
+  return h("article", {class: "prompt-card"},
+    h("div", {class: "prompt-card-head"},
+      h("div", null,
+        h("h3", {class: "prompt-card-title"}, prompt.title),
+        h("div", {class: "prompt-card-meta"}, `${prompt.category} · ${prompt.is_curated ? "Research-backed" : "Personal"}`)),
+      h("div", {class: "prompt-card-actions"},
+        h("button", {
+          type: "button",
+          class: "btn sm",
+          onclick: () => {
+            applySlash({text: prompt.prompt});
+            showChatView();
+          }
+        }, "Use"),
+        !prompt.is_curated ? h("button", {
+          type: "button",
+          class: "icon-button",
+          title: "Delete prompt",
+          "aria-label": `Delete ${prompt.title}`,
+          onclick: async () => {
+            try {
+              await api(API.prompt(prompt.id), {method: "DELETE"});
+              await openPromptLibrary();
+            } catch (error) {
+              toast(error.message, {type: "error"});
+            }
+          }
+        }, icon("trash")) : null)),
+    h("p", {class: "prompt-card-description"}, prompt.description),
+    h("pre", {class: "prompt-card-preview"}, prompt.prompt),
+    h("div", {class: "prompt-card-rationale"}, h("strong", null, "Why it works: "), prompt.rationale || "A reusable prompt with explicit context and output requirements."),
+    source);
+}
+
+function showChatView() {
+  dom.chatLayout.classList.remove("library-open");
+  dom.promptLibraryView.hidden = true;
+  dom.topbar.hidden = false;
+  dom.chatBody.hidden = false;
+  $$(".nav-item[data-feature='promptLibrary']").forEach(item => item.classList.remove("active"));
+}
+
+async function openPromptLibrary() {
+  const prompts = await loadPromptLibrary();
+  const categories = ["all", ...new Set(prompts.map(prompt => prompt.category).filter(Boolean))];
+  const selectedCategory = {value: "all"};
+  const createForm = h("form", {class: "prompt-create-form", onsubmit: async event => {
+    event.preventDefault();
+    const title = $(".prompt-new-title", createForm).value.trim();
+    const prompt = $(".prompt-new-content", createForm).value.trim();
+    if (!title || !prompt) {
+      toast("Add a title and prompt first.");
+      return;
+    }
+    try {
+      await api(API.prompts, {
+        method: "POST",
+        body: JSON.stringify({title, prompt, category: $(".prompt-new-category", createForm).value})
+      });
+      await openPromptLibrary();
+      toast("Prompt saved.");
+    } catch (error) {
+      toast(error.message, {type: "error"});
+    }
+  }},
+    h("input", {class: "field prompt-new-title", placeholder: "Prompt title", "aria-label": "Prompt title", maxlength: "120"}),
+    h("select", {class: "field prompt-new-category", "aria-label": "Prompt category"},
+      ["general", "creativity", "logic", "programming", "design", "concise", "research", "writing", "planning"]
+        .map(category => h("option", {value: category}, category))),
+    h("textarea", {class: "field prompt-new-content", rows: "4", placeholder: "Write a reusable prompt…", "aria-label": "Prompt content", maxlength: "12000"}),
+    h("button", {type: "submit", class: "btn sm"}, "Save personal prompt"));
+
+  const list = h("div", {class: "prompt-library-list"});
+  const renderList = () => {
+    const visible = selectedCategory.value === "all"
+      ? prompts
+      : prompts.filter(prompt => prompt.category === selectedCategory.value);
+    list.replaceChildren(...visible.map(promptCard));
+  };
+  const filters = h("div", {class: "prompt-category-filters", role: "tablist", "aria-label": "Prompt categories"},
+    categories.map(category => h("button", {
+      type: "button",
+      class: `prompt-category-filter${category === "all" ? " active" : ""}`,
+      role: "tab",
+      "aria-selected": String(category === "all"),
+      onclick: event => {
+        selectedCategory.value = category;
+        $$(".prompt-category-filter", filters).forEach(button => {
+          const active = button === event.currentTarget;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-selected", String(active));
+        });
+        renderList();
+      }
+    }, category === "all" ? "All" : category)));
+  renderList();
+
+  dom.promptLibraryView.replaceChildren(
+    h("div", {class: "prompt-library-shell"},
+      h("header", {class: "prompt-library-header"},
+        h("div", null,
+          h("div", {class: "eyebrow"}, "AI Mind"),
+          h("h1", {class: "prompt-library-title"}, "Prompt library"),
+          h("p", {class: "prompt-library-intro"}, "Research-backed patterns for clearer tasks, better reasoning, and more reliable outputs.")),
+        h("button", {type: "button", class: "btn sm", onclick: showChatView}, icon("message"), "Back to chat")),
+      h("div", {class: "prompt-library-content"},
+        filters,
+        list,
+        h("details", {class: "prompt-create"},
+          h("summary", null, "Save a personal prompt"),
+          createForm))));
+  dom.chatLayout.classList.add("library-open");
+  dom.promptLibraryView.hidden = false;
+  dom.topbar.hidden = true;
+  dom.chatBody.hidden = true;
+  $$(".nav-item[data-feature='promptLibrary']").forEach(item => item.classList.add("active"));
 }
 
 /** Returns true when the key was consumed by the slash menu. */
@@ -3680,6 +3838,7 @@ function bindEvents() {
     item.addEventListener("click", () => {
       const key = item.dataset.feature;
       if (key === "projects") { openProjects(); return; }
+      if (key === "promptLibrary") { openPromptLibrary(); return; }
       if (requireFeature(key)) emitFeature(key);
     });
   });
@@ -3820,6 +3979,7 @@ async function boot() {
   loadConversations();
   loadProviders();
   loadProjects();
+  loadPromptLibrary();
   if (state.conversationId !== null && state.conversationId !== undefined && state.conversationId !== "") {
     await selectConversation(state.conversationId);
   }

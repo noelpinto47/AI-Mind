@@ -206,14 +206,19 @@ def _build_prompt(messages, memories, ignored_memories):
     )
 
     return f"""
+<role>
 You are the memory manager for a personal AI assistant.
+</role>
 
+<task>
 Your job is NOT to summarize the conversation.
 
 Your job is to determine whether the conversation contains
 stable, useful information about the USER that should persist
 across future conversations.
+</task>
 
+<memory_policy>
 Only create or update a memory when the information is genuinely
 useful beyond the current conversation.
 
@@ -249,15 +254,19 @@ IMPORTANT:
 - Only create/update memories when confidence is high.
 - Maximum 2 memory actions.
 - If nothing deserves to be remembered, return an empty actions array.
+</memory_policy>
 
-Existing memories:
+<existing_memories>
 {memory_text}
+</existing_memories>
 
-Previously ignored memories:
+<ignored_memories>
 {ignored_text}
+</ignored_memories>
 
-Recent conversation:
+<recent_conversation>
 {conversation_text}
+</recent_conversation>
 
 Return ONLY valid JSON in exactly this format:
 

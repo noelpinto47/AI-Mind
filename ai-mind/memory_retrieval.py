@@ -97,27 +97,25 @@ def _build_retrieval_prompt(user_message, memories, limit):
     memory_context = "\n\n".join(memory_lines)
 
     return f"""
+<role>
 You are the memory retrieval component of a personal AI assistant.
+</role>
 
-Your job is ONLY to identify which existing memories are relevant
-to the user's current message.
+<task>
+Identify which existing memories are relevant to the user's current message.
+Do not create, modify, or rewrite memories. Do not infer facts that are not
+explicitly present in the available memories.
+</task>
 
-Do NOT create memories.
-Do NOT modify memories.
-Do NOT rewrite memories.
-Do NOT infer facts that are not explicitly present in the memories.
-
-Return ONLY the IDs of memories that are genuinely useful for
-answering the user's current message.
-
-User message:
+<user_message>
 {user_message}
+</user_message>
 
-Available memories:
-
+<available_memories>
 {memory_context}
+</available_memories>
 
-Rules:
+<rules>
 - Return at most {limit} memory IDs.
 - Only select memories that have meaningful relevance to the user's message.
 - Do not select memories merely because they are generally about the user.
@@ -126,6 +124,7 @@ Rules:
 - Project memories should only be selected when the user's message relates to that project.
 - If no memories are relevant, return an empty list.
 - Never invent memory IDs.
+</rules>
 
 Return EXACTLY this JSON format:
 

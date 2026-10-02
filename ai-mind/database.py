@@ -137,6 +137,23 @@ def init_database():
         )
     """)
 
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS prompt_library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT UNIQUE,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            prompt TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'general',
+            source_name TEXT,
+            source_url TEXT,
+            rationale TEXT,
+            is_curated INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Migration: add metadata column for pre-existing databases created
     # before this column was introduced. Safe to run on every startup.
     if not _column_exists(connection, "messages", "metadata"):
@@ -175,9 +192,309 @@ def init_database():
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_memories_hash ON memories(content_hash)"
     )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prompt_library_category "
+        "ON prompt_library(category)"
+    )
+
+    curated_prompts = [
+        (
+            "structured-task",
+            "Structured task brief",
+            "Turn an ambiguous request into a clear, executable brief.",
+            "general",
+            """<task>
+Describe the task you want completed.
+</task>
+<context>
+Add the relevant background, constraints, and existing work.
+</context>
+<requirements>
+List must-have outcomes, exclusions, and quality criteria.
+</requirements>
+<output>
+Return: (1) assumptions, (2) a concise plan, (3) the first concrete step.
+</output>""",
+            "OpenAI Prompt Engineering",
+            "https://developers.openai.com/api/docs/guides/prompt-engineering",
+            "Separates the objective, context, constraints, and output contract so the model has less ambiguity and produces an actionable response.",
+        ),
+        (
+            "code-review",
+            "Evidence-based code review",
+            "Review code with prioritized, actionable findings.",
+            "coding",
+            """Review the code below.
+Focus only on correctness, security, maintainability, and performance risks.
+For each finding, provide:
+- severity: critical, high, medium, or low
+- exact location
+- why it matters
+- a minimal fix
+If you find no issue, say so explicitly. Do not invent problems.
+
+<code>
+Paste code here.
+</code>""",
+            "Google Gemini Prompt Design Strategies",
+            "https://ai.google.dev/gemini-api/docs/prompting-strategies",
+            "Defines evaluation criteria and an explicit output shape, which improves consistency and discourages speculative findings.",
+        ),
+        (
+            "debug",
+            "Reproducible debugging",
+            "Turn an error report into a focused diagnosis and test plan.",
+            "coding",
+            """Help debug this issue.
+
+<error>
+Paste the exact error and stack trace.
+</error>
+<environment>
+Include runtime, versions, platform, and recent changes.
+</environment>
+<expected>
+What should happen?
+</expected>
+<actual>
+What happens instead?
+</actual>
+
+Reason from the evidence. Return:
+1. most likely cause and confidence
+2. two alternative hypotheses
+3. smallest diagnostic test
+4. minimal fix
+5. regression test to add""",
+            "Anthropic Prompting Best Practices",
+            "https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview",
+            "Uses clear delimiters and asks for evidence, hypotheses, and verification rather than jumping straight to an unsupported fix.",
+        ),
+        (
+            "summarize-decisions",
+            "Decision-focused summary",
+            "Compress long notes without losing decisions or open work.",
+            "writing",
+            """Summarize the material below for someone who must continue the work.
+Preserve only:
+- goals and constraints
+- decisions and their reasons
+- unresolved questions
+- risks and dependencies
+- next actions with owners, if present
+Separate confirmed facts from assumptions. Do not invent missing details.
+Use concise headings and bullets.
+
+<material>
+Paste notes, transcript, or document here.
+</material>""",
+            "Anthropic: Prompting long context",
+            "https://www.anthropic.com/news/prompting-long-context",
+            "Prioritizes relevant excerpts and durable information, which reduces context noise while preserving the information needed for follow-up work.",
+        ),
+        (
+            "rewrite",
+            "Audience-aware rewrite",
+            "Rewrite content while preserving intent and controlling tone.",
+            "writing",
+            """Rewrite the text below for <audience>describe the audience</audience>.
+Goal: <goal>describe the desired outcome</goal>
+Tone: <tone>professional, warm, direct, or other</tone>
+Constraints: preserve factual claims, names, links, and required terminology.
+Return only the revised text, followed by a short note listing any ambiguity
+that prevented an exact rewrite.
+
+<text>
+Paste text here.
+</text>""",
+            "OpenAI Prompt Engineering",
+            "https://developers.openai.com/api/docs/guides/prompt-engineering",
+            "Makes audience, goal, tone, constraints, and output format explicit instead of relying on vague style instructions.",
+        ),
+        (
+            "logic",
+            "Stepwise logic check",
+            "Analyze a difficult question without skipping assumptions or edge cases.",
+            "logic",
+            """Analyze this problem carefully.
+First identify the known facts, unknowns, constraints, and definitions.
+Then work through the solution in explicit, verifiable steps.
+Check the result against the original requirements and list any uncertainty.
+Do not invent missing information.
+
+<problem>
+Describe the problem here.
+</problem>
+
+Return:
+1. assumptions
+2. reasoning summary
+3. conclusion
+4. edge cases or confidence limits""",
+            "Chain-of-Thought Prompting",
+            "https://arxiv.org/abs/2201.11903",
+            "Decomposes a complex task into intermediate, checkable steps and asks for a conclusion plus uncertainty instead of an unsupported answer.",
+        ),
+        (
+            "creative-ideation",
+            "Divergent creative ideation",
+            "Generate varied ideas before selecting the strongest direction.",
+            "creativity",
+            """Generate creative directions for the brief below.
+Create 8 genuinely different concepts, not minor variations.
+For each, include: name, central idea, audience value, and one risk.
+Then compare the concepts against the stated constraints and recommend
+the best two with a short reason. Avoid clichés and explain unusual choices.
+
+<brief>
+Describe the creative challenge, audience, tone, and constraints.
+</brief>""",
+            "Tree of Thoughts",
+            "https://arxiv.org/abs/2305.10601",
+            "Separates exploration from evaluation: multiple candidate directions are generated first, then assessed against explicit constraints.",
+        ),
+        (
+            "design-brief",
+            "Human-centered design brief",
+            "Turn a vague product idea into a usable design direction.",
+            "design",
+            """Create a design brief from the information below.
+Cover: target user, core problem, desired behavior, content hierarchy,
+interaction states, accessibility needs, visual direction, and success metrics.
+Call out assumptions and ask no more than three high-impact questions.
+Prefer simple, calm, usable solutions over decorative complexity.
+
+<idea>
+Describe the product, feature, or interface.
+</idea>""",
+            "Prompt Design and Engineering",
+            "https://arxiv.org/abs/2401.14423",
+            "Uses a role- and outcome-oriented structure to translate an open-ended request into requirements, constraints, and measurable success criteria.",
+        ),
+        (
+            "concise-answer",
+            "Concise answer",
+            "Get the shortest useful answer without losing essential caveats.",
+            "concise",
+            """Answer the question below in the minimum length needed to be
+correct and useful. Start with the direct answer in one sentence, then add
+at most three bullets for essential detail. Include a caveat only if omitting
+it would make the answer misleading. Do not repeat the question.
+
+<question>
+Ask your question here.
+</question>""",
+            "Systematic Survey of Prompt Engineering",
+            "https://arxiv.org/abs/2402.07927",
+            "Sets a measurable length and output contract while preserving correctness and caveats, reducing unnecessary context and verbosity.",
+        ),
+        (
+            "research-synthesis",
+            "Research synthesis",
+            "Compare sources and separate evidence from interpretation.",
+            "research",
+            """Synthesize the sources below for the stated question.
+For each major claim, distinguish direct evidence, reasonable inference,
+and unresolved uncertainty. Compare disagreements rather than hiding them.
+End with a concise conclusion and the most useful follow-up question.
+Do not cite a source for a claim it does not support.
+
+<question>
+State the research question.
+</question>
+<sources>
+Paste source excerpts or links here.
+</sources>""",
+            "ReAct: Synergizing Reasoning and Acting",
+            "https://arxiv.org/abs/2210.03629",
+            "Separates evidence gathering, interpretation, and conclusion, reducing unsupported synthesis and making uncertainty visible.",
+        ),
+    ]
+    connection.executemany(
+        """
+        INSERT OR IGNORE INTO prompt_library (
+            slug, title, description, category, prompt,
+            source_name, source_url, rationale, is_curated
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        """,
+        curated_prompts,
+    )
+    connection.execute(
+        """
+        UPDATE prompt_library
+        SET category = CASE slug
+            WHEN 'structured-task' THEN 'planning'
+            WHEN 'code-review' THEN 'programming'
+            WHEN 'debug' THEN 'programming'
+            WHEN 'summarize-decisions' THEN 'concise'
+            WHEN 'rewrite' THEN 'writing'
+            ELSE category
+        END
+        WHERE is_curated = 1
+        """
+    )
 
     connection.commit()
     connection.close()
+
+
+def list_prompt_library():
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT id, slug, title, description, prompt, category,
+               source_name, source_url, rationale, is_curated,
+               created_at, updated_at
+        FROM prompt_library
+        ORDER BY is_curated DESC, category ASC, title ASC, id ASC
+        """
+    ).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def create_prompt(
+    title,
+    prompt,
+    description="",
+    category="general",
+    source_name=None,
+    source_url=None,
+    rationale=None,
+):
+    connection = get_connection()
+    cursor = connection.execute(
+        """
+        INSERT INTO prompt_library (
+            title, description, prompt, category,
+            source_name, source_url, rationale, is_curated
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+        """,
+        (
+            title.strip(),
+            description.strip(),
+            prompt.strip(),
+            category.strip() or "general",
+            source_name.strip() if source_name else None,
+            source_url.strip() if source_url else None,
+            rationale.strip() if rationale else None,
+        ),
+    )
+    connection.commit()
+    prompt_id = cursor.lastrowid
+    connection.close()
+    return prompt_id
+
+
+def delete_prompt(prompt_id):
+    connection = get_connection()
+    cursor = connection.execute(
+        "DELETE FROM prompt_library WHERE id = ? AND is_curated = 0",
+        (prompt_id,),
+    )
+    connection.commit()
+    connection.close()
+    return cursor.rowcount > 0
 
 
 def record_ai_usage(

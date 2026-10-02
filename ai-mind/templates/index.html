@@ -158,13 +158,15 @@
       </div>
     </header>
 
+    <section id="prompt-library-view" class="prompt-library-view" aria-label="Prompt library" hidden></section>
+
     <div class="chat-body">
       <div class="chat-column">
         <section id="chat" class="chat is-empty" aria-label="Conversation">
           <div id="welcome" class="welcome">
             <div class="welcome-mark"><svg class="ico"><use href="#i-sparkle"/></svg></div>
             <h1 id="welcome-title">How can I help?</h1>
-            <p>Your personal AI, with your conversations and approved memories.</p>
+            <p>Your personal AI, with your conversations and automatic memory.</p>
             <div class="suggestions">
               <button type="button" class="suggestion" data-prompt="Explain something I'm working on: ">
                 <svg class="ico"><use href="#i-book"/></svg><span>Explain something I'm working on</span>
@@ -271,6 +273,7 @@
 
 <dialog id="settings-dialog" class="dialog settings" aria-label="Settings"></dialog>
 <dialog id="projects-dialog" class="dialog projects" aria-label="Projects"></dialog>
+<dialog id="prompt-library-dialog" class="dialog prompt-library" aria-label="Prompt library"></dialog>
 <dialog id="shortcuts-dialog" class="dialog dialog-md" aria-label="Keyboard shortcuts"></dialog>
 <dialog id="confirm-dialog" class="dialog dialog-sm" aria-label="Confirm"></dialog>
 

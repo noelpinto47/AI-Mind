@@ -75,6 +75,35 @@ The web interface includes:
 - File and text attachments
 - Automatic background memory processing
 
+### Prompt library
+
+The sidebar Prompt library contains curated, source-backed prompt patterns
+organized into **Creativity**, **Logic**, **Programming**, **Design**,
+**Concise**, **Research**, **Planning**, and **Writing**. Category filters
+make it easy to find the right pattern without changing the chat structure.
+Each curated prompt includes:
+
+- A reusable template with explicit context and output sections
+- The research or provider documentation source
+- A short explanation of why the structure improves reliability
+
+Prompts can be inserted into the composer with **Use**, saved as personal
+prompts, or inserted directly from the composer with `/`. The curated
+examples are original adaptations of the linked guidance rather than copied
+source text.
+
+Sources include:
+
+- [OpenAI Prompt Engineering](https://developers.openai.com/api/docs/guides/prompt-engineering)
+- [Google Gemini Prompting Strategies](https://ai.google.dev/gemini-api/docs/prompting-strategies)
+- [Anthropic Prompt Engineering](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview)
+- [Anthropic Prompting Long Context](https://www.anthropic.com/news/prompting-long-context)
+- [Chain-of-Thought Prompting Elicits Reasoning in Large Language Models](https://arxiv.org/abs/2201.11903)
+- [Tree of Thoughts: Deliberate Problem Solving with Large Language Models](https://arxiv.org/abs/2305.10601)
+- [ReAct: Synergizing Reasoning and Acting in Language Models](https://arxiv.org/abs/2210.03629)
+- [Prompt Design and Engineering: Introduction and Advanced Methods](https://arxiv.org/abs/2401.14423)
+- [A Systematic Survey of Prompt Engineering in Large Language Models](https://arxiv.org/abs/2402.07927)
+
 ## Architecture
 
 ```text
