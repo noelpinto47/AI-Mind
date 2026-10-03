@@ -47,3 +47,6 @@ Thumbs.db
 *.jpg
 
 videos/
+
+# Edge/Chromium automation profile
+edge-automation/

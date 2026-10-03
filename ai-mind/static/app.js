@@ -153,7 +153,8 @@ const PROVIDER_LABELS = {
   cloudflare: "Cloudflare",
   mistral: "Mistral",
   huggingface: "Hugging Face",
-  openrouter: "OpenRouter"
+  openrouter: "OpenRouter",
+  claude: "Claude"
 };
 
 function providerLabel(name) {
@@ -167,13 +168,13 @@ function availableModels() {
   if (!state.providers.length) return MODELS;
   return [
     MODELS[0],
-    ...state.providers.map(p => ({
-      id: p.provider,
-      name: providerLabel(p.provider),
-      desc: p.available ? p.model : `${p.model} · resting after a recent failure`,
+    ...state.providers.flatMap(p => (p.models || [p.model]).map(model => ({
+      id: p.provider === "claude" ? `claude:${model}` : p.provider,
+      name: p.provider === "claude" ? `Claude · ${model}` : providerLabel(p.provider),
+      desc: p.limit_message || (p.available ? model : `${model} · resting after a recent failure`),
       ico: "bulb",
       live: true
-    }))
+    })))
   ];
 }
 
@@ -1082,7 +1083,7 @@ function normalizeMessage(raw) {
     created_at: raw.created_at ?? raw.timestamp ?? null,
     reasoning: raw.reasoning || null,
     reasoningMs: raw.reasoning_ms || (usage && usage.reasoning_ms) || null,
-    sources: normalizeSources(raw.sources),
+    sources: normalizeSources(raw.sources || (metadata && metadata.sources)),
     followUps: normalizeFollowUps(raw.follow_ups ?? raw.followUps),
     usage,
     provider: raw.provider || (metadata && metadata.provider) || (usage && usage.provider) || null,
@@ -1368,8 +1369,8 @@ function startEdit(message) {
 
 function renderSources(sources) {
   return h("div", {class: "sources"},
-    h("div", {class: "sources-head"}, icon("globe"), h("span", null, sources.length === 1 ? "1 source" : `${sources.length} sources`)),
-    h("div", {class: "sources-list"}, sources.map((source, index) => h(source.url ? "a" : "div", {
+    h("div", {class: "sources-head"}, icon("globe"), h("span", null, sources.length === 1 ? "Reference" : "References")),
+    h("div", {class: "sources-list", role: "list", "aria-label": "References"}, sources.map((source, index) => h(source.url ? "a" : "div", {
       class: "source-card",
       href: source.url,
       target: source.url ? "_blank" : null,
@@ -1419,7 +1420,7 @@ function syncSources(wrap, content, message) {
   const fresh = renderSources(message.sources);
   fresh.dataset.signature = signature;
   if (existing) existing.replaceWith(fresh);
-  else wrap.insertBefore(fresh, content);
+  else content.after(fresh);
 }
 
 function syncFollowUps(wrap, message, streaming) {
@@ -1476,11 +1477,11 @@ function updateAssistantNode(node, message, {streaming = false} = {}) {
   const content = $(".message-content", wrap);
   const markdown = $(".markdown", content);
 
-  syncSources(wrap, content, message);
   syncReasoning(wrap, content, message, streaming);
 
   markdown.innerHTML = renderMarkdown(message.content);
   enhanceMarkdown(markdown, {streaming, sources: message.sources});
+  syncSources(wrap, content, message);
 
   if (message.content || message.reasoning) {
     const waiting = $(".thinking", content);
@@ -2470,6 +2471,10 @@ async function loadProviders() {
   try {
     const data = await api(API.aiRouterStatus);
     state.providers = Array.isArray(data.providers) ? data.providers : [];
+    const claude = state.providers.find(provider => provider.provider === "claude");
+    if (claude && claude.limit_message) {
+      toast(claude.limit_message, {type: "error", duration: 10000});
+    }
   } catch (error) {
     console.error("Failed to load provider status", error);
   }
@@ -2767,6 +2772,7 @@ function resetComposer() {
 function fillPrompt(text) {
   dom.input.value = text;
   autoResize();
+  requestAnimationFrame(autoResize);
   updateComposerState();
   saveDraftSoon();
   dom.input.focus();
@@ -2859,8 +2865,8 @@ function promptCard(prompt) {
           type: "button",
           class: "btn sm",
           onclick: () => {
-            applySlash({text: prompt.prompt});
             showChatView();
+            applySlash({text: prompt.prompt});
           }
         }, "Use"),
         !prompt.is_curated ? h("button", {

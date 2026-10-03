@@ -9,6 +9,12 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from model_selector import get_best_free_models
 from database import get_recent_provider_failures, record_ai_usage
+from claude_browser import (
+    ClaudeUsageLimitError,
+    EFFORT_OPTIONS,
+    FREE_MODELS,
+    configured_claude,
+)
 
 load_dotenv()
 
@@ -82,6 +88,13 @@ class AIRouter:
         self.test_fail_providers = { ... }
         self._best_models = {}
         self.providers = []
+        claude_client = configured_claude()
+        self.providers.append({
+            "client": claude_client,
+            "state": ProviderState(name="claude", model=claude_client.model),
+            "browser_models": list(FREE_MODELS),
+            "effort_options": list(EFFORT_OPTIONS),
+        })
 
         # Do not block Flask startup on slow provider catalog scans.
         threading.Thread(
@@ -515,6 +528,8 @@ class AIRouter:
             status_code = getattr(error, "status_code", None)
             if status_code == 429 or "rate limit" in error_text or "rate_limited" in error_text:
                 cooldown = self.RATE_LIMIT_COOLDOWN_SECONDS
+            elif isinstance(error, ClaudeUsageLimitError):
+                cooldown = 5 * 60 * 60
             elif status_code == 404 or "model_not_found" in error_text:
                 cooldown = self.INVALID_MODEL_COOLDOWN_SECONDS
             else:
@@ -543,6 +558,7 @@ class AIRouter:
         messages: list[dict[str, Any]],
         max_tokens: int | None = None,
         preferred_provider: str | None = None,
+        preferred_effort: str | None = None,
         tools=None,
         request_kind: str = "foreground",
     ):
@@ -608,8 +624,16 @@ class AIRouter:
         with self.lock:
             providers = list(self.providers)
 
+        preferred_model = None
+        explicit_provider = None
         if preferred_provider:
-            preferred_provider = preferred_provider.strip().lower()
+            preferred_provider = preferred_provider.strip()
+            if preferred_provider.lower().startswith("claude:"):
+                preferred_model = preferred_provider.split(":", 1)[1].strip()
+                preferred_provider = "claude"
+            preferred_provider = preferred_provider.lower()
+            if preferred_provider == "claude":
+                explicit_provider = preferred_provider
 
             preferred = [
                 provider
@@ -624,6 +648,10 @@ class AIRouter:
                     if provider["state"].name != preferred_provider
                 ]
                 providers = preferred + rest
+            elif explicit_provider:
+                raise RuntimeError(
+                    f"Selected AI provider '{explicit_provider}' is not configured."
+                )
 
         providers = self._apply_request_kind_order(
             providers,
@@ -634,14 +662,24 @@ class AIRouter:
             client = provider["client"]
             state = provider["state"]
 
+            # Browser-backed Claude is reserved for the user's foreground
+            # request. Background title, memory, and retrieval jobs must not
+            # open additional prompts in the shared Claude tab.
+            if (
+                state.name == "claude"
+                and request_kind != "foreground"
+                and not explicit_provider
+            ):
+                continue
+
             # Skip providers currently in cooldown.
-            if not self._is_available(state):
+            if not explicit_provider and not self._is_available(state):
                 continue
 
             # Cooldowns normally live in memory. The usage table preserves
             # rate-limit knowledge across restarts so background jobs cannot
             # immediately consume the same exhausted provider again.
-            if self._has_persisted_quota_failure(state):
+            if not explicit_provider and self._has_persisted_quota_failure(state):
                 print(
                     f"[AI Router] Skipping {state.name}: "
                     "recent rate limit recorded"
@@ -680,6 +718,28 @@ class AIRouter:
                     max_tokens,
                     tools,
                 )
+                if state.name == "claude":
+                    response = client.chat(
+                        request_messages,
+                        model=preferred_model,
+                        effort=preferred_effort,
+                    )
+                    content = response["content"]
+                    latency_ms = response["latency_ms"]
+                    self._mark_success(state, latency_ms)
+                    return {
+                        "content": content,
+                        "provider": state.name,
+                        "model": response["model"],
+                        "latency_ms": latency_ms,
+                        "fallback_used": fallback_used,
+                        "attempts": attempts,
+                        "tool_calls": None,
+                        "prompt_tokens": None,
+                        "completion_tokens": None,
+                        "total_tokens": None,
+                    }
+
                 request_args: dict[str, Any] = {
                     "model": state.model,
                     "messages": request_messages,
@@ -744,6 +804,13 @@ class AIRouter:
                 }
 
             except Exception as error:
+                if explicit_provider:
+                    if isinstance(error, ClaudeUsageLimitError):
+                        self._mark_failure(state, error)
+                    raise RuntimeError(
+                        f"Selected AI provider '{explicit_provider}' failed: {error}"
+                    ) from error
+
                 if self._is_context_error(error):
                     # Retry once with only the system instruction and the
                     # newest user turn. A context rejection is request-
@@ -854,6 +921,20 @@ class AIRouter:
             state = provider["state"]
 
             available = self._is_available(state)
+            limit_message = None
+            if state.name == "claude":
+                try:
+                    limit_message = provider["client"].usage_limit_message()
+                except Exception:
+                    limit_message = None
+                if limit_message:
+                    available = False
+                    state.available = False
+                    state.last_error = limit_message
+                    state.cooldown_until = max(
+                        state.cooldown_until,
+                        time.time() + 5 * 60 * 60,
+                    )
 
             result.append({
                 "provider": state.name,
@@ -868,6 +949,10 @@ class AIRouter:
                 "last_latency_ms": state.last_latency_ms,
                 "last_error": state.last_error
             })
+            if "browser_models" in provider:
+                result[-1]["models"] = provider["browser_models"]
+                result[-1]["effort_options"] = provider["effort_options"]
+                result[-1]["limit_message"] = limit_message
 
         return result
 

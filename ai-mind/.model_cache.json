@@ -1,8 +1,7 @@
 {
   "version": 4,
-  "timestamp": 1790935817.8445394,
+  "timestamp": 1791020679.0580938,
   "models": {
-    "groq": "allam-2-7b",
     "gemini": "gemini-flash-lite-latest",
     "cloudflare": "@cf/mistral/mistral-7b-instruct-v0.2-lora",
     "mistral": "labs-leanstral-1-5-1",
@@ -12,15 +11,15 @@
   "rejected": {
     "gemini": {
       "gemini-2.5-flash": {
-        "until": 1790964590.3777547,
+        "until": 1791047455.9899602,
         "reason": "Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements. We recommend you"
       },
       "gemini-2.5-pro": {
-        "until": 1790964590.3777547,
+        "until": 1791047455.9899602,
         "reason": "Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend"
       },
       "gemini-flash-latest": {
-        "until": 1790964590.3777547,
+        "until": 1791047455.9899602,
         "reason": "empty response"
       }
     },
@@ -29,26 +28,63 @@
     "huggingface": {},
     "openrouter": {
       "thinkingmachines/inkling-small:free": {
-        "until": 1790964590.3777547,
+        "until": 1791048323.2381775,
         "reason": "Error code: 403 - {'error': {'message': 'thinkingmachines/inkling-small:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps', 'code': 403, 'metadata': {'r"
       },
       "thinkingmachines/inkling:free": {
-        "until": 1790964590.3777547,
+        "until": 1791048323.2381775,
         "reason": "Error code: 403 - {'error': {'message': 'thinkingmachines/inkling:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps', 'code': 403, 'metadata': {'routing"
       },
       "qwen/qwen3.8-27b:free": {
-        "until": 1790964590.3777547,
+        "until": 1791048323.2381775,
         "reason": "empty response"
       },
       "google/gemma-4-26b-a4b-it:free": {
-        "until": 1790964590.3777547,
+        "until": 1791048323.2381775,
         "reason": "Error code: 429 - {'error': {'message': 'Provider returned error', 'code': 429, 'metadata': {'raw': 'google/gemma-4-26b-a4b-it:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limi"
       },
       "google/gemma-4-31b-it:free": {
-        "until": 1790964590.3777547,
+        "until": 1791048323.2381775,
         "reason": "Error code: 429 - {'error': {'message': 'Provider returned error', 'code': 429, 'metadata': {'raw': 'google/gemma-4-31b-it:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: "
+      },
+      "nvidia/nemotron-3.5-lightning:free": {
+        "until": 1791048323.2381775,
+        "reason": "structured JSON response test failed"
+      },
+      "nvidia/nemotron-3-ultra-550b-a55b:free": {
+        "until": 1791048960.486517,
+        "reason": "Markdown Python code-block test failed"
+      },
+      "apodex/apodex-1.1-mini:free": {
+        "until": 1791049394.9267833,
+        "reason": "empty response"
+      },
+      "inclusionai/ling-3.0-flash-sante:free": {
+        "until": 1791049394.9267833,
+        "reason": "empty response"
+      },
+      "nvidia/nemotron-3-super-120b-a12b:free": {
+        "until": 1791049394.9267833,
+        "reason": "empty response"
+      },
+      "cohere/north-mini-code:free": {
+        "until": 1791049394.9267833,
+        "reason": "empty response"
+      },
+      "liquid/lfm-2.5-2.6b:free": {
+        "until": 1791049394.9267833,
+        "reason": "empty response"
+      },
+      "nvidia/nemotron-3.5-content-safety:free": {
+        "until": 1791049394.9267833,
+        "reason": "empty response"
       }
     },
-    "groq": {}
+    "groq": {
+      "allam-2-7b": {
+        "until": 1791048185.3978248,
+        "reason": "Markdown Python code-block test failed"
+      }
+    }
   }
 }
