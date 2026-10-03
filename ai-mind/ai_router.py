@@ -713,12 +713,12 @@ class AIRouter:
             start = time.perf_counter()
 
             try:
-                request_messages, request_max_tokens = self._fit_messages(
-                    api_messages,
-                    max_tokens,
-                    tools,
-                )
                 if state.name == "claude":
+                    # Claude's browser composer must receive the complete
+                    # current user message. The API-provider context fitter
+                    # intentionally truncates oversized newest messages,
+                    # which would silently cut off Claude prompts.
+                    request_messages = api_messages
                     response = client.chat(
                         request_messages,
                         model=preferred_model,
@@ -740,6 +740,11 @@ class AIRouter:
                         "total_tokens": None,
                     }
 
+                request_messages, request_max_tokens = self._fit_messages(
+                    api_messages,
+                    max_tokens,
+                    tools,
+                )
                 request_args: dict[str, Any] = {
                     "model": state.model,
                     "messages": request_messages,
